@@ -389,7 +389,7 @@ public class PsiCashClient {
                         }));
     }
 
-    Observable<PsiCashModel.PsiCash> getPsiCashLocal() {
+    public Observable<PsiCashModel.PsiCash> getPsiCashLocal() {
         return Single.fromCallable(this::psiCashModelFromLib)
                 .toObservable();
     }

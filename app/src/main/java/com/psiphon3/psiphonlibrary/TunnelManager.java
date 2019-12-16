@@ -123,11 +123,11 @@ public class TunnelManager implements PsiphonTunnel.HostService, MyLog.ILogger, 
 
     // Service -> Client bundle parameter names
     static final String DATA_TUNNEL_STATE_IS_RUNNING = "isRunning";
-    static final String DATA_TUNNEL_STATE_IS_VPN = "isVpn";
+    public static final String DATA_TUNNEL_STATE_IS_VPN = "isVpn";
     static final String DATA_TUNNEL_STATE_IS_CONNECTED = "isConnected";
     static final String DATA_TUNNEL_STATE_NEEDS_HELP_CONNECTING = "needsHelpConnecting";
     static final String DATA_TUNNEL_STATE_LISTENING_LOCAL_SOCKS_PROXY_PORT = "listeningLocalSocksProxyPort";
-    static final String DATA_TUNNEL_STATE_LISTENING_LOCAL_HTTP_PROXY_PORT = "listeningLocalHttpProxyPort";
+    public static final String DATA_TUNNEL_STATE_LISTENING_LOCAL_HTTP_PROXY_PORT = "listeningLocalHttpProxyPort";
     static final String DATA_TUNNEL_STATE_CLIENT_REGION = "clientRegion";
     static final String DATA_TUNNEL_STATE_SPONSOR_ID = "sponsorId";
     public static final String DATA_TUNNEL_STATE_HOME_PAGES = "homePages";

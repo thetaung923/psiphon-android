@@ -22,11 +22,10 @@ package com.psiphon3;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
-import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.arch.lifecycle.ViewModelProviders;
 import android.content.Context;
-import android.graphics.drawable.Drawable;
+import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.CountDownTimer;
@@ -36,6 +35,8 @@ import android.support.design.widget.Snackbar;
 import android.support.design.widget.SwipeDismissBehavior;
 import android.support.v4.app.Fragment;
 import android.support.v4.content.LocalBroadcastManager;
+import android.text.TextUtils;
+import android.util.Log;
 import android.util.Pair;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -51,10 +52,13 @@ import android.widget.ProgressBar;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
 
+import com.android.billingclient.api.SkuDetails;
 import com.jakewharton.rxbinding2.view.RxView;
 import com.jakewharton.rxrelay2.BehaviorRelay;
 import com.jakewharton.rxrelay2.PublishRelay;
 import com.jakewharton.rxrelay2.Relay;
+import com.psiphon3.billing.BillingRepository;
+import com.psiphon3.billing.StatusActivityBillingViewModel;
 import com.psiphon3.billing.SubscriptionState;
 import com.psiphon3.psicash.PsiCashClient;
 import com.psiphon3.psicash.PsiCashException;
@@ -67,13 +71,17 @@ import com.psiphon3.psicash.RewardedVideoClient;
 import com.psiphon3.psicash.mvibase.MviView;
 import com.psiphon3.psicash.util.BroadcastIntent;
 import com.psiphon3.psiphonlibrary.Authorization;
+import com.psiphon3.psiphonlibrary.LocalizedActivities;
 import com.psiphon3.psiphonlibrary.Utils;
 import com.psiphon3.subscription.R;
 
 import net.grandcentrix.tray.AppPreferences;
 
+import org.json.JSONException;
+
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -81,7 +89,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import ca.psiphon.psicashlib.PsiCashLib;
+import io.reactivex.Maybe;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.disposables.Disposable;
@@ -89,13 +99,15 @@ import io.reactivex.functions.BiFunction;
 
 public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, PsiCashViewState> {
     private static final String TAG = "PsiCashFragment";
+    static final int PSICASH_DETAILS_ACTIVITY_RESULT = 20002;
     private final CompositeDisposable compositeDisposable = new CompositeDisposable();
     private Disposable viewStatesDisposable;
     private PsiCashViewModel psiCashViewModel;
+    private StatusActivityBillingViewModel billingViewModel;
+
 
     private Relay<PsiCashIntent> intentsPublishRelay = PublishRelay.<PsiCashIntent>create().toSerialized();
     private Relay<TunnelState> tunnelConnectionStateBehaviorRelay = BehaviorRelay.<TunnelState>create().toSerialized();
-    private Relay<SubscriptionState> subscriptionStateBehaviorRelay = BehaviorRelay.<SubscriptionState>create().toSerialized();
     private Relay<LifeCycleEvent> lifecyclePublishRelay = PublishRelay.<LifeCycleEvent>create().toSerialized();
     private PublishRelay<Observable<ViewPropertyAnimator>> balanceDeltaAnimationRelay = PublishRelay.create();
     private PublishRelay<Observable<ValueAnimator>> balanceLabelAnimationRelay = PublishRelay.create();
@@ -108,8 +120,6 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
     private boolean animateOnBalanceChange = false;
 
     private Button loadWatchRewardedVideoBtn;
-    private TextView psiCashChargeProgressTextView;
-    private View psiCashLayout;
     private AtomicBoolean keepLoadingVideos = new AtomicBoolean(false);
     private final AtomicBoolean shouldGetPsiCashRemote = new AtomicBoolean(false);
     private boolean shouldAutoPlayVideo;
@@ -119,8 +129,37 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
-        psiCashLayout = inflater.inflate(R.layout.psicash_fragment, container, false);
-        return  psiCashLayout;
+        return inflater.inflate(R.layout.psicash_fragment, container, false);
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if(requestCode == PSICASH_DETAILS_ACTIVITY_RESULT) {
+            if(resultCode != LocalizedActivities.Activity.RESULT_OK) {
+                return;
+            }
+            if (data.hasExtra(PsiCashStoreActivity.PURCHASE_PSICASH)) {
+                String skuString = data.getStringExtra(PsiCashStoreActivity.PURCHASE_PSICASH_SKU_JSON);
+                try {
+                    if (TextUtils.isEmpty(skuString)) {
+                        throw new IllegalArgumentException("SKU is empty.");
+                    }
+                    SkuDetails skuDetails = new SkuDetails(skuString);
+//                    psiCashPurchaseRelay.accept(skuDetails);
+                } catch (JSONException | IllegalArgumentException e) {
+                    Utils.MyLog.g("PsiCashFragment::onActivityResult purchase SKU error: " + e);
+                }
+
+            } else if (data.hasExtra(PsiCashStoreActivity.PURCHASE_SPEEDBOOST)) {
+                String skuString = data.getStringExtra(PsiCashStoreActivity.PURCHASE_PSICASH_SKU_JSON);
+
+//                speedBoostPurchaseRelay.accept()
+            }
+        } else {
+            super.onActivityResult(requestCode, resultCode, data);
+        }
+
+        Log.d(TAG, "onActivityResult:" + requestCode + ", " + resultCode + ", " + data);
     }
 
     @Override
@@ -168,16 +207,15 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
         progressBar = getActivity().findViewById(R.id.progress_view);
         progressBar.setIndeterminate(true);
         speedBoostBtn = getActivity().findViewById(R.id.purchase_speedboost_btn);
-        speedBoostBtn.setVisibility(View.INVISIBLE);
-        psiCashChargeProgressTextView = getActivity().findViewById(R.id.psicash_balance_progress);
-        psiCashChargeProgressTextView.setVisibility(View.INVISIBLE);
         balanceLabel = getActivity().findViewById(R.id.psicash_balance_label);
         balanceLabel.setText("0");
         loadWatchRewardedVideoBtn = getActivity().findViewById(R.id.load_watch_rewarded_video_btn);
         // Load video button clicks
         compositeDisposable.add(loadVideoAdsDisposable());
+/*
         // Buy speed boost button events.
         compositeDisposable.add(speedBoostClicksDisposable());
+*/
         // Unconditionally get latest local PsiCash state when app is foregrounded
         compositeDisposable.add(getPsiCashLocalDisposable());
         // Get PsiCash tokens when tunnel connects if there are none
@@ -199,6 +237,40 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
                 .subscribe(ValueAnimator::start, err -> {
                     Utils.MyLog.g("Balance label increase animation error: " + err);
                 }));
+
+        billingViewModel = ViewModelProviders.of(getActivity()).get(StatusActivityBillingViewModel.class);
+        billingViewModel.queryCurrentSubscriptionStatus();
+    }
+
+
+    public void onPsiCashStoreClick(int uiBalance) {
+        compositeDisposable.add(
+                billingViewModel.subscriptionStateFlowable()
+                        .firstOrError()
+                        .flatMapMaybe(subscriptionState -> {
+                            if (subscriptionState.hasValidPurchase()) {
+                                return Maybe.empty();
+                            }
+                            return billingViewModel.allSkuDetailsSingle()
+                                    .toObservable()
+                                    .flatMap(Observable::fromIterable)
+                                    .filter(skuDetails -> {
+                                        String sku = skuDetails.getSku();
+                                        return BillingRepository.IAB_PSICASH_SKUS_TO_VALUE.containsKey(sku);
+                                    })
+                                    .map(SkuDetails::getOriginalJson)
+                                    .toList()
+                                    .toMaybe();
+                        })
+                        .doOnSuccess(jsonSkuDetailsList -> {
+                            Intent intent = new Intent(getActivity(), PsiCashStoreActivity.class);
+                            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                            intent.putExtra(PsiCashStoreActivity.PSICASH_BALANCE_EXTRA, uiBalance);
+                            intent.putStringArrayListExtra(PsiCashStoreActivity.PSICASH_SKU_DETAILS_LIST_EXTRA, new ArrayList<>(jsonSkuDetailsList));
+                            getActivity().startActivityForResult(intent, PSICASH_DETAILS_ACTIVITY_RESULT);
+                        })
+                        .subscribe()
+        );
     }
 
     private Disposable removePurchasesDisposable() {
@@ -376,7 +448,7 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
     }
 
     private Disposable loadVideoAdsDisposable() {
-       return RxView.clicks(loadWatchRewardedVideoBtn)
+        return RxView.clicks(loadWatchRewardedVideoBtn)
                 .debounce(200, TimeUnit.MILLISECONDS)
                 .takeWhile(click -> hasValidTokens())
                 .switchMap(click -> {
@@ -406,7 +478,8 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
     }
 
     private Observable<SubscriptionState> subscriptionStateObservable() {
-        return subscriptionStateBehaviorRelay
+        return billingViewModel.subscriptionStateFlowable()
+                .toObservable()
                 .hide()
                 .distinctUntilChanged();
     }
@@ -421,7 +494,7 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
         Throwable psiCashStateError = state.error();
         if(psiCashStateError == null) {
             updateUiBalanceLabel(state);
-            updateUiChargeBar(state);
+            updateSpeedBoostButton(state);
             updateUiProgressView(state);
             updateUiRewardedVideoButton(state);
         } else {
@@ -472,7 +545,7 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
         Snackbar snackbar = Snackbar.make(getActivity().findViewById(R.id.psicash_coordinator_layout), errorMessage, snackBarTimeousMs);
 
         // Center the message in the text view.
-        TextView tv = snackbar.getView().findViewById(android.support.design.R.id.snackbar_text);
+        TextView tv = (TextView) snackbar.getView().findViewById(android.support.design.R.id.snackbar_text);
         tv.setMaxLines(5);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
             tv.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
@@ -512,9 +585,7 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
         }
     }
 
-    private void updateUiChargeBar(PsiCashViewState state) {
-        PsiCashLib.PurchasePrice purchasePrice = state.purchasePrice();
-        speedBoostBtn.setTag(R.id.speedBoostPrice, purchasePrice);
+    private void updateSpeedBoostButton(PsiCashViewState state) {
         speedBoostBtn.setEnabled(!state.psiCashTransactionInFlight());
         Date nextPurchaseExpiryDate = state.nextPurchaseExpiryDate();
         if (nextPurchaseExpiryDate != null && new Date().before(nextPurchaseExpiryDate)) {
@@ -523,47 +594,14 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
             }
             long millisDiff = nextPurchaseExpiryDate.getTime() - new Date().getTime();
             startActiveSpeedBoostCountDown(millisDiff);
-            psiCashChargeProgressTextView.setVisibility(View.INVISIBLE);
-            speedBoostBtn.setVisibility(View.VISIBLE);
             speedBoostBtn.setTag(R.id.hasActiveSpeedBoostTag, true);
         } else {
             if(activeSpeedBoostListener != null ) {
                 activeSpeedBoostListener.onActiveSpeedBoost(Boolean.FALSE);
             }
             speedBoostBtn.setTag(R.id.hasActiveSpeedBoostTag, false);
-            if(purchasePrice != null && purchasePrice.price != 0) {
-                if (purchasePrice.price / 1e9 > state.uiBalance()) {
-                    speedBoostBtn.setVisibility(View.INVISIBLE);
-                    psiCashChargeProgressTextView.setVisibility(View.VISIBLE);
-
-                    int chargePercentage = (int) Math.floor(state.uiBalance() / (purchasePrice.price / 1e9) * 100);
-
-                    Drawable d = psiCashChargeProgressTextView.getBackground();
-                    d.setLevel(chargePercentage * 100);
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
-                        psiCashChargeProgressTextView.setBackground(d);
-                    } else {
-                        psiCashChargeProgressTextView.setBackgroundDrawable(d);
-                    }
-
-                    psiCashChargeProgressTextView.setText(String.format(Locale.US , "%s %d%%",
-                            getString(R.string.charging_speed_boost_percents_label),
-                            chargePercentage));
-
-                    psiCashLayout.setOnTouchListener((view, motionEvent) -> {
-                        ObjectAnimator
-                                .ofFloat(view, "translationX", 0, 25, -25, 25, -25, 15, -15, 6, -6, 0)
-                                .setDuration(500)
-                                .start();
-                        return true;
-                    });
-                } else {
-                    speedBoostBtn.setVisibility(View.VISIBLE);
-                    psiCashChargeProgressTextView.setVisibility(View.INVISIBLE);
-                    speedBoostBtn.setText(R.string.one_hour_of_speed_boost_available_button);
-                    psiCashLayout.setOnTouchListener((view, motionEvent) -> false);
-                }
-            }
+            speedBoostBtn.setText(R.string.speed_boost_button_caption);
+            speedBoostBtn.setOnClickListener(v -> onPsiCashStoreClick(state.uiBalance()));
         }
     }
 
@@ -758,10 +796,6 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
 
     public void onTunnelConnectionState(TunnelState status) {
         tunnelConnectionStateBehaviorRelay.accept(status);
-    }
-
-    void onSubscriptionState(SubscriptionState subscriptionState) {
-        subscriptionStateBehaviorRelay.accept(subscriptionState);
     }
 
     void onOpenHomePage() {

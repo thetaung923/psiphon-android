@@ -19,7 +19,6 @@
 
 package com.psiphon3;
 
-import android.annotation.SuppressLint;
 import android.app.AlertDialog;
 import android.arch.lifecycle.ViewModelProviders;
 import android.content.ActivityNotFoundException;
@@ -34,14 +33,20 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.support.v4.app.FragmentManager;
+import android.support.v7.widget.Toolbar;
 import android.text.TextUtils;
+import android.util.Log;
 import android.util.Pair;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
+import android.webkit.WebView;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.ProgressBar;
 import android.widget.TabHost;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -52,8 +57,7 @@ import com.psiphon3.billing.BillingRepository;
 import com.psiphon3.billing.StatusActivityBillingViewModel;
 import com.psiphon3.billing.SubscriptionState;
 import com.psiphon3.kin.KinPermissionManager;
-import com.psiphon3.psicash.PsiCashClient;
-import com.psiphon3.psiphonlibrary.MainBase;
+import com.psiphon3.psiphonlibrary.EmbeddedValues;
 import com.psiphon3.psiphonlibrary.PsiphonConstants;
 import com.psiphon3.psiphonlibrary.TunnelManager;
 import com.psiphon3.psiphonlibrary.Utils;
@@ -74,11 +78,9 @@ import io.reactivex.Completable;
 import io.reactivex.Maybe;
 import io.reactivex.Observable;
 import io.reactivex.Single;
-import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.BiFunction;
-import io.reactivex.schedulers.Schedulers;
 
 
 public class StatusActivity
@@ -106,6 +108,9 @@ public class StatusActivity
     private StatusActivityBillingViewModel billingViewModel;
     private CompositeDisposable compositeDisposable = new CompositeDisposable();
 
+    private View embeddedWebView;
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -120,19 +125,32 @@ public class StatusActivity
             kinPermissionManager = new KinPermissionManager();
         }
 
+        Toolbar toolbar = findViewById(R.id.toolbar);
+        TextView versionLabel = toolbar.findViewById(R.id.toolbar_version_label);
+        versionLabel.setText(String.format(Locale.US, "v. %s", EmbeddedValues.CLIENT_VERSION));
+        setSupportActionBar(toolbar);
+
         m_tabHost = (TabHost)findViewById(R.id.tabHost);
         m_tabSpecsList = new ArrayList<>();
         m_toggleButton = (Button)findViewById(R.id.toggleButton);
+        m_connectionProgressBar = findViewById(R.id.connectionProgressBar);
 
         mRateLimitedTextSection = findViewById(R.id.rateLimitedTextSection);
         mRateLimitedText = (TextView)findViewById(R.id.rateLimitedText);
         mRateUnlimitedText = (TextView)findViewById(R.id.rateUnlimitedText);
         mRateLimitSubscribeButton = (Button)findViewById(R.id.rateLimitUpgradeButton);
 
+        LayoutInflater inflater = (LayoutInflater)getBaseContext().getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+        embeddedWebView = inflater.inflate(R.layout.embedded_webview_layout, null);
+
+
+
         // PsiCash and rewarded video fragment
         FragmentManager fm = getSupportFragmentManager();
         psiCashFragment = (PsiCashFragment) fm.findFragmentById(R.id.psicash_fragment_container);
-        psiCashFragment.setActiveSpeedBoostListener(this);
+        if(psiCashFragment != null) {
+            psiCashFragment.setActiveSpeedBoostListener(this);
+        }
 
         // Rate limit observable
         Observable<RateLimitMode> currentRateLimitModeObservable =
@@ -187,13 +205,15 @@ public class StatusActivity
                             if (subscriptionState.error() != null) {
                                 MyLog.g("Subscription state billing error: " + subscriptionState.error());
                             }
-                            psiCashFragment.onSubscriptionState(subscriptionState);
                             psiphonAdManager.onSubscriptionState(subscriptionState);
+                            // TODO: make some kind of disable/enable PsiCash UI
+                            /*
                             if (subscriptionState.hasValidPurchase()) {
                                 hidePsiCashTab();
                             } else {
                                 showPsiCashTabIfHasValidToken();
                             }
+                            */
                         })
                         .subscribe()
         );
@@ -229,7 +249,6 @@ public class StatusActivity
         );
 
         setupActivityLayout();
-        hidePsiCashTab();
 
         HandleCurrentIntent();
     }
@@ -299,41 +318,6 @@ public class StatusActivity
         super.onDestroy();
     }
 
-    private void hidePsiCashTab() {
-        m_tabHost
-                .getTabWidget()
-                .getChildTabViewAt(MainBase.TabbedActivityBase.TabIndex.PSICASH.ordinal())
-                .setVisibility(View.GONE);
-        // also reset current tab to HOME if PsiCash is currently selected
-        String currentTabTag = m_tabHost.getCurrentTabTag();
-        if (currentTabTag != null && currentTabTag.equals(PSICASH_TAB_TAG)) {
-            disableInterstitialOnNextTabChange = true;
-            m_tabHost.setCurrentTabByTag(HOME_TAB_TAG);
-        }
-    }
-
-    @SuppressLint("CheckResult")
-    private void showPsiCashTabIfHasValidToken() {
-        // Hide or show the PsiCash tab depending on presence of valid PsiCash tokens.
-        // Wrap in Rx Single to run the valid tokens check on a non-UI thread and then
-        // update the UI on main thread when we get result.
-        Single.fromCallable(() -> PsiCashClient.getInstance(this).hasValidTokens())
-                .doOnError(err -> MyLog.g("Error showing PsiCash tab:" + err))
-                .onErrorResumeNext(Single.just(Boolean.FALSE))
-                .subscribeOn(Schedulers.computation())
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribe(showTab -> {
-                    if (showTab) {
-                        m_tabHost
-                                .getTabWidget()
-                                .getChildTabViewAt(MainBase.TabbedActivityBase.TabIndex.PSICASH.ordinal())
-                                .setVisibility(View.VISIBLE);
-                    } else {
-                        hidePsiCashTab();
-                    }
-                });
-    }
-
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
@@ -397,12 +381,10 @@ public class StatusActivity
                     String url = homePages.get(0);
                     // At this point we're showing the URL in either the embedded webview or in a browser.
                     // Some URLs are excluded from being embedded as home pages.
-                    if(shouldLoadInEmbeddedWebView(url)) {
-                        // Reset m_loadedSponsorTab and switch to the home tab.
-                        // The embedded web view will get loaded by the updateServiceStateUI.
-                        m_loadedSponsorTab = false;
-                       disableInterstitialOnNextTabChange = true;
-                       m_tabHost.setCurrentTabByTag(HOME_TAB_TAG);
+                    if (shouldLoadInEmbeddedWebView(url)) {
+                        boolean isVpn = data.getBoolean(TunnelManager.DATA_TUNNEL_STATE_IS_VPN, false);
+                        int httpProxyPort = isVpn ? 0 : data.getInt(TunnelManager.DATA_TUNNEL_STATE_LISTENING_LOCAL_HTTP_PROXY_PORT, 0);
+                        loadInEmbeddedWebView(url, httpProxyPort);
                     } else {
                         displayBrowser(this, url);
                     }
@@ -443,6 +425,28 @@ public class StatusActivity
             // OK to be null because we don't use it
             onGetHelpConnectingClick(null);
         }
+    }
+
+    private void loadInEmbeddedWebView(String url, int httpProxyPort) {
+        final WebView webView = embeddedWebView.findViewById(R.id.sponsorWebView);
+        final ProgressBar progressBar = embeddedWebView.findViewById(R.id.sponsorWebViewProgressBar);
+
+        m_sponsorHomePage = new SponsorHomePage(webView, progressBar);
+        m_sponsorHomePage.load(url, httpProxyPort);
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setView(embeddedWebView);
+        builder.setPositiveButton(android.R.string.ok, (dialog, which) -> {
+            dialog.dismiss();
+        });
+
+        AlertDialog alertDialog = builder.create();
+        alertDialog.setOnDismissListener(dialogInterface -> {
+            webView.loadUrl("about:blank");
+            ((ViewGroup)embeddedWebView.getParent()).removeView(embeddedWebView);
+        });
+
+        alertDialog.show();
     }
 
     public void onToggleClick(View v) {
@@ -527,6 +531,7 @@ public class StatusActivity
         int countdownSeconds = 10;
         startUpInterstitialDisposable = psiphonAdManager.getCurrentAdTypeObservable()
                 .take(1)
+                .doOnNext(s -> Log.d("HACK", "startUp: " + s))
                 .switchMap(adResult -> {
                     if (adResult.type() == PsiphonAdManager.AdResult.Type.NONE) {
                         doStartUp();
@@ -898,6 +903,8 @@ public class StatusActivity
             } else {
                 Utils.MyLog.g("StatusActivity::onActivityResult: PaymentChooserActivity: canceled");
             }
+        } else if (requestCode == PsiCashFragment.PSICASH_DETAILS_ACTIVITY_RESULT) {
+            psiCashFragment.onActivityResult(requestCode, resultCode, data);
         } else {
             super.onActivityResult(requestCode, resultCode, data);
         }
