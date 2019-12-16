@@ -239,7 +239,6 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
                 }));
 
         billingViewModel = ViewModelProviders.of(getActivity()).get(StatusActivityBillingViewModel.class);
-        billingViewModel.queryCurrentSubscriptionStatus();
     }
 
 
@@ -303,6 +302,8 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
         super.onResume();
         bindViewState();
         lifecyclePublishRelay.accept(LifeCycleEvent.ON_RESUME);
+        billingViewModel.queryCurrentSubscriptionStatus();
+        billingViewModel.queryAllSkuDetails();
     }
 
     @Override

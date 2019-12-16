@@ -26,6 +26,7 @@ import com.google.auto.value.AutoValue;
 import com.psiphon3.psicash.mvibase.MviViewState;
 
 import java.util.Date;
+import java.util.List;
 
 import ca.psiphon.psicashlib.PsiCashLib;
 
@@ -38,7 +39,7 @@ public abstract class PsiCashViewState implements MviViewState {
     public abstract boolean animateOnNextBalanceChange();
 
     @Nullable
-    public abstract PsiCashLib.PurchasePrice purchasePrice();
+    public abstract List<PsiCashLib.PurchasePrice> purchasePrices();
 
     @Nullable
     public abstract Date nextPurchaseExpiryDate();
@@ -59,7 +60,7 @@ public abstract class PsiCashViewState implements MviViewState {
     static PsiCashViewState idle() {
         return new AutoValue_PsiCashViewState.Builder()
                 .uiBalance(0)
-                .purchasePrice(null)
+                .purchasePrices(null)
                 .nextPurchaseExpiryDate(null)
                 .error(null)
                 .psiCashTransactionInFlight(false)
@@ -77,7 +78,7 @@ public abstract class PsiCashViewState implements MviViewState {
 
         abstract Builder error(@Nullable Throwable error);
 
-        abstract Builder purchasePrice(@Nullable PsiCashLib.PurchasePrice price);
+        abstract Builder purchasePrices(@Nullable List<PsiCashLib.PurchasePrice> prices);
 
         abstract Builder nextPurchaseExpiryDate(@Nullable Date date);
 

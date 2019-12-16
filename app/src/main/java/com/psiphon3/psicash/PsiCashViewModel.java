@@ -78,8 +78,8 @@ public class PsiCashViewModel extends AndroidViewModel implements MviViewModel {
                 if (result instanceof PsiCashResult.GetPsiCash) {
                     PsiCashResult.GetPsiCash getPsiCashResult = (PsiCashResult.GetPsiCash) result;
 
-                    PsiCashLib.PurchasePrice price = null;
                     Date nextPurchaseExpiryDate = null;
+                    List<PsiCashLib.PurchasePrice> purchasePriceList = null;
 
                     PsiCashModel.PsiCash model = getPsiCashResult.model();
                     int uiBalance = 0;
@@ -88,14 +88,7 @@ public class PsiCashViewModel extends AndroidViewModel implements MviViewModel {
                         long reward = model.reward();
                         uiBalance = (int)(Math.floor((long) ((reward * 1e9 + balance) / 1e9)));
 
-                        List<PsiCashLib.PurchasePrice> purchasePriceList = model.purchasePrices();
-                        if(purchasePriceList != null) {
-                            for (PsiCashLib.PurchasePrice p : purchasePriceList) {
-                                if (p.distinguisher.equals(DISTINGUISHER_1HR)) {
-                                    price = p;
-                                }
-                            }
-                        }
+                        purchasePriceList = model.purchasePrices();
 
                         PsiCashLib.Purchase nextExpiringPurchase = model.nextExpiringPurchase();
                         if (nextExpiringPurchase != null) {
@@ -106,7 +99,7 @@ public class PsiCashViewModel extends AndroidViewModel implements MviViewModel {
                         case SUCCESS:
                             return stateBuilder
                                     .uiBalance(uiBalance)
-                                    .purchasePrice(price)
+                                    .purchasePrices(purchasePriceList)
                                     .nextPurchaseExpiryDate(nextPurchaseExpiryDate)
                                     .psiCashTransactionInFlight(false)
                                     // after first success animate on consecutive balance changes
