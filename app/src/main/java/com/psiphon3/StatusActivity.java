@@ -35,7 +35,6 @@ import android.os.Bundle;
 import android.support.v4.app.FragmentManager;
 import android.support.v7.widget.Toolbar;
 import android.text.TextUtils;
-import android.util.Log;
 import android.util.Pair;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -531,7 +530,6 @@ public class StatusActivity
         int countdownSeconds = 10;
         startUpInterstitialDisposable = psiphonAdManager.getCurrentAdTypeObservable()
                 .take(1)
-                .doOnNext(s -> Log.d("HACK", "startUp: " + s))
                 .switchMap(adResult -> {
                     if (adResult.type() == PsiphonAdManager.AdResult.Type.NONE) {
                         doStartUp();
