@@ -44,7 +44,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.ProgressBar;
 import android.widget.TabHost;
 import android.widget.TextView;
@@ -55,7 +54,6 @@ import com.jakewharton.rxrelay2.PublishRelay;
 import com.psiphon3.billing.BillingRepository;
 import com.psiphon3.billing.StatusActivityBillingViewModel;
 import com.psiphon3.billing.SubscriptionState;
-import com.psiphon3.kin.KinPermissionManager;
 import com.psiphon3.psiphonlibrary.EmbeddedValues;
 import com.psiphon3.psiphonlibrary.PsiphonConstants;
 import com.psiphon3.psiphonlibrary.TunnelManager;
@@ -74,9 +72,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import io.reactivex.Completable;
-import io.reactivex.Maybe;
 import io.reactivex.Observable;
-import io.reactivex.Single;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.BiFunction;
@@ -101,7 +97,6 @@ public class StatusActivity
     private Disposable startUpInterstitialDisposable;
     private boolean disableInterstitialOnNextTabChange;
     private PublishRelay<Boolean> activeSpeedBoostRelay;
-    private KinPermissionManager kinPermissionManager;
     private Disposable toggleClickDisposable;
 
     private StatusActivityBillingViewModel billingViewModel;
@@ -119,10 +114,6 @@ public class StatusActivity
 
         setRequestedOrientation (ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         setContentView(R.layout.main);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
-            kinPermissionManager = new KinPermissionManager();
-        }
 
         Toolbar toolbar = findViewById(R.id.toolbar);
         TextView versionLabel = toolbar.findViewById(R.id.toolbar_version_label);
@@ -216,28 +207,6 @@ public class StatusActivity
                         })
                         .subscribe()
         );
-
-        // Setup Kin UI
-        if (kinPermissionManager != null &&
-                kinPermissionManager.hasOptInPreference(getApplicationContext())) {
-            compositeDisposable.add(
-                    billingViewModel.subscriptionStateFlowable()
-                            .concatMapMaybe(subscriptionState -> {
-                                if (subscriptionState.hasValidPurchase()) {
-                                    enableKinOptInCheckBox(false);
-                                    return Maybe.empty();
-                                } else {
-                                    enableKinOptInCheckBox(true);
-                                    return kinPermissionManager.getUsersAgreementToKin(this)
-                                            .doOnSuccess(this::setKinOptInUiState)
-                                            .toMaybe();
-                                }
-                            })
-                            .subscribe()
-            );
-        } else {
-            enableKinOptInCheckBox(false);
-        }
 
         compositeDisposable.add(
                 tunnelServiceInteractor.tunnelStateFlowable()
@@ -449,40 +418,7 @@ public class StatusActivity
     }
 
     public void onToggleClick(View v) {
-        // Only check for payment when starting in WDM, also make sure subscribers don't get prompted for Kin.
-        boolean wantVPN = m_multiProcessPreferences
-                .getBoolean(getString(R.string.tunnelWholeDevicePreference),
-                        false);
-
-        if (wantVPN && Utils.hasVpnService() && kinPermissionManager != null) {
-            // prevent multiple confirmation dialogs
-            if (toggleClickDisposable != null && !toggleClickDisposable.isDisposed()) {
-                return;
-            }
-            // else
-            toggleClickDisposable = billingViewModel.subscriptionStateFlowable()
-                    .switchMapSingle(subscriptionState -> {
-                        if (subscriptionState.hasValidPurchase()) {
-                            // Return any object to complete subscription, the value is ignored
-                            return Single.just(new Object());
-                        }
-                        return Single.fromCallable(() -> kinPermissionManager.isOptedIn(getApplicationContext()))
-                                .flatMap(optedIn -> optedIn ?
-                                                kinPermissionManager.confirmDonation(this) :
-                                                Single.just(false)
-                                )
-                                .doOnSuccess(this::notifyTunnelKinState)
-                                .doOnSuccess(this::setKinOptInUiState);
-
-                    })
-                    .firstOrError()
-                    .ignoreElement()
-                    .doOnComplete(this::doToggle)
-                    .subscribe();
-            compositeDisposable.add(toggleClickDisposable);
-        } else {
-            doToggle();
-        }
+        doToggle();
     }
 
     public void onGetHelpConnectingClick(View v) {
@@ -498,27 +434,6 @@ public class StatusActivity
     {
         Intent feedbackIntent = new Intent(this, FeedbackActivity.class);
         startActivity(feedbackIntent);
-    }
-
-    public void onKinEnabledClick(View v) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
-            return;
-        }
-        // Assume this will always be the kin enabled checkbox
-        CheckBox checkBox = (CheckBox) v;
-        // Prevent the default toggle, that's handled automatically by a subscription to the opted-in state
-        checkBox.setChecked(!checkBox.isChecked());
-        Single<Boolean> kinOptInStateSingle;
-        if (kinPermissionManager.isOptedIn(this)) {
-            kinOptInStateSingle = kinPermissionManager.optOut(this);
-        } else {
-            kinOptInStateSingle = kinPermissionManager.optIn(this);
-        }
-        compositeDisposable.add(
-                kinOptInStateSingle
-                        .doOnSuccess(this::setKinOptInUiState)
-                        .doOnSuccess(this::notifyTunnelKinState)
-                        .subscribe());
     }
 
     @Override
@@ -763,25 +678,7 @@ public class StatusActivity
         activeSpeedBoostRelay.accept(hasActiveSpeedBoost);
     }
 
-    private void notifyTunnelKinState(Boolean state) {
-        tunnelServiceInteractor.onKinOptInState(state);
-    }
-
     enum RateLimitMode {AD_MODE_LIMITED, LIMITED_SUBSCRIPTION, UNLIMITED_SUBSCRIPTION, SPEED_BOOST}
-
-    private void enableKinOptInCheckBox(boolean enable) {
-        CheckBox checkBoxKinEnabled = findViewById(R.id.check_box_kin_enabled);
-        // Disable the checkbox if Kin opt-in preference was never initialized
-        enable = enable &&
-                kinPermissionManager != null &&
-                kinPermissionManager.hasOptInPreference(getApplicationContext());
-
-        if(enable) {
-            checkBoxKinEnabled.setVisibility(View.VISIBLE);
-        } else {
-            checkBoxKinEnabled.setVisibility(View.GONE);
-        }
-    }
 
     private void setRateLimitUI(RateLimitMode rateLimitMode) {
         // Update UI elements showing the current speed.
@@ -927,14 +824,5 @@ public class StatusActivity
                 .setMessage(messageId)
                 .setPositiveButton(android.R.string.ok, null)
                 .show();
-    }
-
-    private void setKinOptInUiState(boolean optedIn) {
-        CheckBox checkBoxKinEnabled = findViewById(R.id.check_box_kin_enabled);
-        if (optedIn) {
-            checkBoxKinEnabled.setChecked(true);
-        } else {
-            checkBoxKinEnabled.setChecked(false);
-        }
     }
 }
