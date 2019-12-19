@@ -58,6 +58,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 public class StatusActivity
         extends com.psiphon3.psiphonlibrary.MainBase.TabbedActivityBase {
@@ -103,20 +104,28 @@ public class StatusActivity
         m_firstRun = false;
     }
 
-    private boolean shouldAutoStart() {
-        return m_firstRun &&
-                !tunnelServiceInteractor.isServiceRunning(getApplicationContext()) &&
-                !getIntent().getBooleanExtra(INTENT_EXTRA_PREVENT_AUTO_START, false);
-    }
-
     @Override
     protected void onResume() {
         super.onResume();
         // Auto-start on app first run
-        if (shouldAutoStart()) {
-            preventAutoStart();
-            startUp();
-        }
+        compositeDisposable.add(
+                tunnelServiceInteractor.tunnelStateFlowable()
+                        .filter(tunnelState -> !tunnelState.isUnknown())
+                        .firstOrError()
+                        // send down true if not running so the logs from
+                        // previous sessions would be removed.
+                        .map(tunnelState -> !tunnelState.isRunning())
+                        // make sure this subscription times out within reasonable interval
+                        .timeout(2000, TimeUnit.MILLISECONDS)
+                        .onErrorReturnItem(false)
+                        .doOnSuccess(isStopped -> {
+                            if (isStopped && m_firstRun) {
+                                preventAutoStart();
+                                startUp();
+                            }
+                        })
+                        .subscribe()
+        );
     }
 
     private void setUpBanner() {

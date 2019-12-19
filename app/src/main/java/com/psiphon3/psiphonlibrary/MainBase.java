@@ -166,7 +166,7 @@ public abstract class MainBase {
         private Button m_moreOptionsButton;
         private Button m_openBrowserButton;
         private LoggingObserver m_loggingObserver;
-        private CompositeDisposable compositeDisposable = new CompositeDisposable();
+        protected CompositeDisposable compositeDisposable = new CompositeDisposable();
         protected TunnelServiceInteractor tunnelServiceInteractor;
         private Disposable handleNfcIntentDisposable;
 
@@ -537,9 +537,23 @@ public abstract class MainBase {
             tunnelServiceInteractor = new TunnelServiceInteractor(getApplicationContext());
 
             // remove logs from previous sessions
-            if (!tunnelServiceInteractor.isServiceRunning(getApplicationContext())) {
-                LoggingProvider.LogDatabaseHelper.truncateLogs(this, true);
-            }
+            compositeDisposable.add(
+                    tunnelServiceInteractor.tunnelStateFlowable()
+                            .filter(tunnelState -> !tunnelState.isUnknown())
+                            .firstOrError()
+                            // send down true if not running so the logs from
+                            // previous sessions would be removed.
+                            .map(tunnelState -> !tunnelState.isRunning())
+                            // make sure this subscription times out withing reasonable interval
+                            .timeout(1000, TimeUnit.MILLISECONDS)
+                            .onErrorReturnItem(false)
+                            .doOnSuccess(shouldTruncateLogs -> {
+                                if (shouldTruncateLogs) {
+                                    LoggingProvider.LogDatabaseHelper.truncateLogs(this, true);
+                                }
+                            })
+                            .subscribe()
+            );
 
             // Get the connection help buttons
             mGetHelpConnectingButton = findViewById(R.id.getHelpConnectingButton);
@@ -769,7 +783,7 @@ public abstract class MainBase {
             // Load new logs from the logging provider when it changes
             getContentResolver().registerContentObserver(LoggingProvider.INSERT_URI, true, m_loggingObserver);
 
-            tunnelServiceInteractor.resume(getApplicationContext());
+            tunnelServiceInteractor.resume();
 
             // Don't show the keyboard until edit selected
             getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN);
@@ -829,7 +843,7 @@ public abstract class MainBase {
             super.onPause();
             getContentResolver().unregisterContentObserver(m_loggingObserver);
             cancelInvalidProxySettingsToast();
-            tunnelServiceInteractor.pause(getApplicationContext());
+            tunnelServiceInteractor.pause();
         }
 
         protected void doToggle() {

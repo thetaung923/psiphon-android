@@ -19,13 +19,13 @@
 
 package com.psiphon3.psiphonlibrary;
 
-import android.app.ActivityManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -33,10 +33,12 @@ import android.os.Message;
 import android.os.Messenger;
 import android.os.RemoteException;
 import android.support.v4.content.LocalBroadcastManager;
+import android.support.v4.util.Pair;
 
 import com.jakewharton.rxrelay2.BehaviorRelay;
 import com.jakewharton.rxrelay2.PublishRelay;
 import com.jakewharton.rxrelay2.Relay;
+import com.jakewharton.rxrelay2.ReplayRelay;
 import com.psiphon3.R;
 import com.psiphon3.TunnelState;
 
@@ -44,15 +46,15 @@ import net.grandcentrix.tray.AppPreferences;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.concurrent.TimeUnit;
 
 import io.reactivex.BackpressureStrategy;
 import io.reactivex.Flowable;
+import io.reactivex.Maybe;
 import io.reactivex.Observable;
 import io.reactivex.ObservableEmitter;
 import io.reactivex.ObservableOnSubscribe;
 import io.reactivex.disposables.Disposable;
-
-import static android.content.Context.ACTIVITY_SERVICE;
 
 public class TunnelServiceInteractor {
     private static final String SERVICE_STARTING_BROADCAST_INTENT = "SERVICE_STARTING_BROADCAST_INTENT";
@@ -60,15 +62,23 @@ public class TunnelServiceInteractor {
     private Relay<Boolean> dataStatsRelay = PublishRelay.<Boolean>create().toSerialized();
     private Relay<Boolean> knownRegionsRelay = PublishRelay.<Boolean>create().toSerialized();
     private Relay<NfcExchange> nfcExchangeRelay = PublishRelay.<NfcExchange>create().toSerialized();
+    private Relay<Pair<Integer, Bundle>> serviceMessageRelay;
 
     private final Messenger incomingMessenger = new Messenger(new IncomingMessageHandler(this));
+    private final Observable<Messenger> serviceMessengerObservable;
     private Disposable restartServiceDisposable = null;
-
-    private Rx2ServiceBindingFactory serviceBindingFactory;
+    private Disposable sendMessageDisposable = null;
 
     private boolean isPaused = true;
 
     public TunnelServiceInteractor(Context context) {
+        Intent bomIntent = getServiceIntent(context, false);
+        Intent vpnIntent = getServiceIntent(context, true);
+        Rx2ServiceBindingFactory serviceBindingFactoryBom = new Rx2ServiceBindingFactory(context, bomIntent);
+        Rx2ServiceBindingFactory serviceBindingFactoryVpn = new Rx2ServiceBindingFactory(context, vpnIntent);
+
+        serviceMessengerObservable = Observable.merge(serviceBindingFactoryBom.getMessengerObservable(), serviceBindingFactoryVpn.getMessengerObservable());
+
         // Listen to SERVICE_STARTING_BROADCAST_INTENT broadcast that may be sent by another instance
         IntentFilter intentFilter = new IntentFilter();
         intentFilter.addAction(SERVICE_STARTING_BROADCAST_INTENT);
@@ -78,7 +88,10 @@ public class TunnelServiceInteractor {
                 String action = intent.getAction();
                 if (action != null) {
                     if (action.equals(SERVICE_STARTING_BROADCAST_INTENT) && !isPaused) {
-                        bindTunnelService(context, intent);
+                        if (sendMessageDisposable != null) {
+                            sendMessageDisposable.dispose();
+                        }
+                        registerWithService(0);
                     }
                 }
             }
@@ -86,29 +99,24 @@ public class TunnelServiceInteractor {
         LocalBroadcastManager.getInstance(context).registerReceiver(broadcastReceiver, intentFilter);
     }
 
-    public void resume(Context context) {
+    public void resume() {
         isPaused = false;
-        tunnelStateRelay.accept(TunnelState.unknown());
-        String serviceName = getRunningService(context);
-        if (serviceName != null) {
-            final Intent bindingIntent;
-            if (isVpnService(serviceName)) {
-                bindingIntent = getVpnServiceIntent(context);
-            } else {
-                bindingIntent = new Intent(context, TunnelService.class);
-            }
-            bindTunnelService(context, bindingIntent);
-        } else {
-            tunnelStateRelay.accept(TunnelState.stopped());
+        long bindTimeoutMillis = 1000;
+        if (Build.VERSION.SDK_INT >= 24) {
+            bindTimeoutMillis = 250;
+        } else if (Build.VERSION.SDK_INT >= 22) {
+            bindTimeoutMillis = 400;
+        } else if (Build.VERSION.SDK_INT >= 14) {
+            bindTimeoutMillis = 500;
         }
+        registerWithService(bindTimeoutMillis);
     }
 
-    public void pause(Context context) {
+    public void pause() {
         isPaused = true;
-        tunnelStateRelay.accept(TunnelState.unknown());
-        if (serviceBindingFactory != null) {
-            sendServiceMessage(TunnelManager.ClientToServiceMessage.UNREGISTER.ordinal(), null);
-            serviceBindingFactory.unbind(context);
+        sendServiceMessage(TunnelManager.ClientToServiceMessage.UNREGISTER.ordinal(), null);
+        if (sendMessageDisposable != null) {
+            sendMessageDisposable.dispose();
         }
     }
 
@@ -117,7 +125,7 @@ public class TunnelServiceInteractor {
         Intent intent = getServiceIntent(context, wantVPN);
         try {
             context.startService(intent);
-            // Send tunnel starting service broadcast to all instances so they all bind
+            // Send tunnel starting service broadcast to all instances so they all bind.
             LocalBroadcastManager.getInstance(context).sendBroadcast(intent.setAction(SERVICE_STARTING_BROADCAST_INTENT));
         } catch (SecurityException | IllegalStateException e) {
             Utils.MyLog.g("startTunnelService failed with error: " + e);
@@ -131,24 +139,36 @@ public class TunnelServiceInteractor {
     }
 
     public void scheduleRunningTunnelServiceRestart(Context context, Runnable startServiceRunnable) {
-        String runningService = getRunningService(context);
-        if (runningService == null) {
-            // There is no running service, do nothing.
-            return;
-        }
-        // If the running service doesn't need to be changed from WDM to BOM or vice versa we will
-        // just message the service a restart command and have it restart Psiphon tunnel (and VPN
-        // if in WDM mode) internally via TunnelManager.onRestartCommand without stopping the service.
-        // If the WDM preference has changed we will message the service to stop self, wait for it to
-        // stop and then start a brand new service via checkRestartTunnel on a timer.
-        AppPreferences appPreferences = new AppPreferences(context);
-        boolean wantVPN = appPreferences.getBoolean(context.getString(R.string.tunnelWholeDevicePreference), false);
-        if ((wantVPN && isVpnService(runningService))
-                || (!wantVPN && runningService.equals(TunnelService.class.getName()))) {
-            commandTunnelRestart();
-        } else {
-            scheduleCompleteServiceRestart(startServiceRunnable);
-        }
+        tunnelStateFlowable()
+                .filter(tunnelState -> !tunnelState.isUnknown())
+                .timeout(
+                        Flowable.timer(1000, TimeUnit.MILLISECONDS),
+                        ignored -> Flowable.never()
+                )
+                .firstOrError()
+                .toMaybe()
+                .onErrorResumeNext(Maybe.empty())
+                // If the running service doesn't need to be changed from WDM to BOM or vice versa we will
+                // just message the service a restart command and have it restart Psiphon tunnel (and VPN
+                // if in WDM mode) internally via TunnelManager.onRestartCommand without stopping the service.
+                // If the WDM preference has changed we will message the service to stop self, wait for it to
+                // stop and then start a brand new service via checkRestartTunnel on a timer.
+                .doOnSuccess(tunnelState -> {
+                    // If the service is not running do not do anything.
+                    if (tunnelState.isRunning()) {
+                        AppPreferences appPreferences = new AppPreferences(context);
+                        boolean wantVPN = appPreferences
+                                .getBoolean(context.getString(R.string.tunnelWholeDevicePreference),
+                                        false);
+
+                        if (tunnelState.connectionData().vpnMode() == wantVPN) {
+                            commandTunnelRestart();
+                        } else {
+                            scheduleCompleteServiceRestart(startServiceRunnable);
+                        }
+                    }
+                })
+                .subscribe();
     }
 
     public Flowable<TunnelState> tunnelStateFlowable() {
@@ -173,31 +193,8 @@ public class TunnelServiceInteractor {
                 .toFlowable(BackpressureStrategy.LATEST);
     }
 
-    public boolean isServiceRunning(Context context) {
-        return getRunningService(context) != null;
-    }
-
     private Intent getVpnServiceIntent(Context context) {
         return new Intent(context, TunnelVpnService.class);
-    }
-
-    private String getRunningService(Context context) {
-        ActivityManager manager = (ActivityManager) context.getSystemService(ACTIVITY_SERVICE);
-        if (manager == null) {
-            return null;
-        }
-        for (ActivityManager.RunningServiceInfo service : manager.getRunningServices(Integer.MAX_VALUE)) {
-            if (service.uid == android.os.Process.myUid() &&
-                    (TunnelService.class.getName().equals(service.service.getClassName())
-                            || isVpnService(service.service.getClassName()))) {
-                return service.service.getClassName();
-            }
-        }
-        return null;
-    }
-
-    private boolean isVpnService(String className) {
-        return Utils.hasVpnService() && TunnelVpnService.class.getName().equals(className);
     }
 
     private void commandTunnelRestart() {
@@ -210,46 +207,63 @@ public class TunnelServiceInteractor {
             return;
         }
         // Start observing service connection for disconnected message then command service stop.
-        restartServiceDisposable = serviceBindingFactory.getMessengerObservable()
+        restartServiceDisposable = getMessengerObservableWithTimeout(0)
                 .doOnComplete(startServiceRunnable::run)
                 .subscribe();
         stopTunnelService();
     }
 
-    private void bindTunnelService(Context context, Intent intent) {
-        serviceBindingFactory = new Rx2ServiceBindingFactory(context, intent);
-        serviceBindingFactory.getMessengerObservable()
-                .doOnComplete(() -> tunnelStateRelay.accept(TunnelState.stopped()))
-                .doOnComplete(() -> dataStatsRelay.accept(Boolean.FALSE))
-                .subscribe();
-        sendServiceMessage(TunnelManager.ClientToServiceMessage.REGISTER.ordinal(), null);
+    private void registerWithService(long timeoutMillis) {
+        serviceMessageRelay = ReplayRelay.<Pair<Integer, Bundle>>create().toSerialized();
+        if (sendMessageDisposable == null || sendMessageDisposable.isDisposed()) {
+            sendMessageDisposable = getMessengerObservableWithTimeout(timeoutMillis)
+                    .doOnSubscribe(__ -> tunnelStateRelay.accept(TunnelState.unknown()))
+                    .doOnComplete(() -> tunnelStateRelay.accept(TunnelState.stopped()))
+                    .doOnDispose(() -> tunnelStateRelay.accept(TunnelState.unknown()))
+                    .switchMapCompletable(messenger -> serviceMessageRelay
+                            .doOnNext(pair -> {
+                                int what = pair.first;
+                                Bundle data = pair.second;
+                                try {
+                                    Message msg = Message.obtain(null, what);
+                                    msg.replyTo = incomingMessenger;
+                                    if (data != null) {
+                                        msg.setData(data);
+                                    }
+                                    messenger.send(msg);
+                                } catch (RemoteException e) {
+                                    Utils.MyLog.g(String.format("sendServiceMessage failed: %s", e.getMessage()));
+                                }
+                            })
+                            .ignoreElements())
+                    .subscribe();
+
+            sendServiceMessage(TunnelManager.ClientToServiceMessage.REGISTER.ordinal(), null);
+        }
+    }
+
+    private Observable<Messenger> getMessengerObservableWithTimeout(long timeoutMillis) {
+        if (timeoutMillis > 0) {
+            return serviceMessengerObservable
+                    .timeout(
+                            Observable.timer(timeoutMillis, TimeUnit.MILLISECONDS),
+                            ignored -> Observable.never()
+                    )
+                    .onErrorResumeNext(Observable.empty());
+        }
+        return serviceMessengerObservable;
     }
 
     private Intent getServiceIntent(Context context, boolean wantVPN) {
-        Intent intent = wantVPN && Utils.hasVpnService() ?
+        return wantVPN && Utils.hasVpnService() ?
                 getVpnServiceIntent(context) : new Intent(context, TunnelService.class);
-        return intent;
     }
 
     private void sendServiceMessage(int what, Bundle data) {
-        if (serviceBindingFactory == null) {
-            return;
+        if (serviceMessageRelay != null) {
+            Pair<Integer, Bundle> message = new Pair<>(what, data);
+            serviceMessageRelay.accept(message);
         }
-        serviceBindingFactory.getMessengerObservable()
-                .take(1)
-                .doOnNext(messenger -> {
-                    try {
-                        Message msg = Message.obtain(null, what);
-                        msg.replyTo = incomingMessenger;
-                        if (data != null) {
-                            msg.setData(data);
-                        }
-                        messenger.send(msg);
-                    } catch (RemoteException e) {
-                        Utils.MyLog.g(String.format("sendServiceMessage failed: %s", e.getMessage()));
-                    }
-                })
-                .subscribe();
     }
 
     private static TunnelManager.State getTunnelStateFromBundle(Bundle data) {
@@ -369,7 +383,14 @@ public class TunnelServiceInteractor {
                         context.bindService(intent, con, 0);
                         return Observable.create(con);
                     },
-                    __ -> unbind(context))
+                    __ -> {
+                        unbind(context);
+                    })
+                    .timeout(
+                            Observable.timer(2000, TimeUnit.MILLISECONDS),
+                            ignored -> Observable.never()
+                    )
+                    .onErrorResumeNext(Observable.empty())
                     .replay(1)
                     .refCount();
         }
