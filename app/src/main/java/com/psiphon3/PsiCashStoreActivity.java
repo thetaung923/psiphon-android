@@ -1,6 +1,9 @@
 package com.psiphon3;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
+import android.content.res.Configuration;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
 import android.support.design.widget.TabLayout;
@@ -10,9 +13,14 @@ import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentManager;
 import android.support.v4.app.FragmentPagerAdapter;
 import android.support.v4.view.ViewPager;
+import android.support.v7.app.AlertDialog;
+import android.support.v7.widget.GridLayout;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.RelativeLayout;
 import android.widget.TextView;
 
 import com.psiphon3.psicash.PsiCashClient;
@@ -36,7 +44,8 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
     public static final String PSICASH_BALANCE_EXTRA = "PSICASH_BALANCE_EXTRA";
     public static final String PSICASH_SKU_DETAILS_LIST_EXTRA = "PSICASH_SKU_DETAILS_LIST_EXTRA";
     static final String PURCHASE_SPEEDBOOST = "PURCHASE_SPEEDBOOST";
-    static final String PURCHASE_SPEEDBOOST_OPTION = "PURCHASE_SPEEDBOOST_OPTION";
+    static final String PURCHASE_SPEEDBOOST_DISTINGUISHER = "PURCHASE_SPEEDBOOST_DISTINGUISHER";
+    static final String PURCHASE_SPEEDBOOST_EXPECTED_PRICE = "PURCHASE_SPEEDBOOST_EXPECTED_PRICE";
     static final String PURCHASE_PSICASH = "PURCHASE_PSICASH";
     static final String PURCHASE_PSICASH_SKU_JSON = "PURCHASE_PSICASH_SKU_JSON";
 
@@ -142,7 +151,7 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
                                 .subscribeOn(Schedulers.computation())
                                 .observeOn(AndroidSchedulers.mainThread())
                                 .subscribe(
-                                        psiCashModel -> populatePurchaseOptions(view, psiCashModel.purchasePrices()),
+                                        psiCashModel -> populateSpeedboostPurchasesScreen(view, psiCashModel.purchasePrices()),
                                         err -> {
                                             Utils.MyLog.g("PurchaseSpeedBoostFragment: error getting local PsiCash state:" + err);
                                         }
@@ -179,50 +188,101 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
             tunnelServiceInteractor.pause(getActivity().getApplicationContext());
         }
 
-        private void populatePurchaseOptions(View view, List<PsiCashLib.PurchasePrice> purchasePrices) {
-            /*
-            FlexboxLayout flexboxLayout = view.findViewById(R.id.purchase_speedboost_flexbox);
-            flexboxLayout.setFlexDirection(FlexDirection.ROW);
+        private void populateSpeedboostPurchasesScreen(View view, List<PsiCashLib.PurchasePrice> purchasePrices) {
+            final Activity activity = getActivity();
+            if (activity == null) {
+                return;
+            }
+
+            final int columnCount;
+            int orientation = getResources().getConfiguration().orientation;
+
+            if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                columnCount = 5;
+            } else {
+                columnCount = 3;
+            }
+
+            GridLayout gridLayout = view.findViewById(R.id.purchase_speedboost_grid);
+            gridLayout.setColumnCount(columnCount);
+            gridLayout.post(() -> {
+                for (int i = 0; i < gridLayout.getChildCount(); i++) {
+                    View child = gridLayout.getChildAt(i);
+                    ViewGroup.LayoutParams params = child.getLayoutParams();
+                    params.width = gridLayout.getWidth() / columnCount;
+                    params.height = params.width * 248 / 185;
+                    child.setLayoutParams(params);
+                }
+            });
 
             for (PsiCashLib.PurchasePrice price : purchasePrices) {
-                Drawable drawable = ContextCompat.getDrawable(getActivity().getApplicationContext(), R.drawable.speedboost_background_blue);
-                FlexboxLayout.LayoutParams lp = new FlexboxLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                ImageView myImage = new ImageView(getActivity());
-                myImage.setImageDrawable(drawable);
-//                lp.setFlexBasisPercent(0.33f);
-                myImage.setLayoutParams(lp);
-                flexboxLayout.addView(myImage);
-/*
+                LinearLayout linearLayout = (LinearLayout) activity.getLayoutInflater().inflate(R.layout.speedboost_button_template, null);
+                RelativeLayout relativeLayout = linearLayout.findViewById(R.id.speedboost_relative_layout);
 
-                Drawable drawable = ContextCompat.getDrawable(getActivity().getApplicationContext(), R.drawable.speedboost_background_blue);
-                FlexboxLayout.LayoutParams lp = new FlexboxLayout.LayoutParams(drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight());
+                final int priceInteger = (int) (Math.floor((long) (price.price / 1e9)));
+                int drawableResId = getSpeedBoostPurchaseDrawableResId(priceInteger);
+                relativeLayout.setBackgroundResource(drawableResId);
 
-                TextView textView = new TextView(getActivity());
-                textView.setBackgroundDrawable(drawable);
-                textView.setText("Price: " + (int)(price.price/1e9));
-                textView.setLayoutParams(lp);
-                flexboxLayout.addView(textView);
+                TextView durationLabel = linearLayout.findViewById(R.id.speedboost_purchase_label);
+                final String durationString = getDurationString(price.distinguisher);
+                durationLabel.setText(durationString);
+
+                Button button = linearLayout.findViewById(R.id.speedboost_purchase_button);
+                String priceTag = String.format(Locale.US, "%d", priceInteger);
+                button.setText(priceTag);
+                button.setOnClickListener(v -> {
+                    String confirmationMessage = String.format(
+                            activity.getString(R.string.lbl_confirm_speedboost_purchase),
+                            durationString,
+                            priceInteger
+                    );
+
+                    new AlertDialog.Builder(activity)
+                            .setIcon(R.drawable.psicash_coin)
+                            .setTitle(activity.getString(R.string.speed_boost_button_caption))
+                            .setMessage(confirmationMessage)
+                            .setNegativeButton(R.string.lbl_no, (dialog, which) -> {
+                            })
+                            .setPositiveButton(R.string.lbl_yes, (dialog, which) -> {
+                                try {
+                                    Intent data = new Intent();
+                                    data.putExtra(PURCHASE_SPEEDBOOST, true);
+                                    data.putExtra(PURCHASE_SPEEDBOOST_DISTINGUISHER, price.distinguisher);
+                                    data.putExtra(PURCHASE_SPEEDBOOST_EXPECTED_PRICE, price.price);
+                                    activity.setResult(RESULT_OK, data);
+
+                                    activity.finish();
+                                } catch (NullPointerException e) {
+                                }
+                            })
+                            .setCancelable(true)
+                            .create()
+                            .show();
+                });
+
+                gridLayout.addView(linearLayout);
             }
         }
 
+        private String getDurationString(String distinguisher) {
+            // TODO: return a translated string
+            return distinguisher;
+        }
 
-
-/*
-                Button button = view.findViewById(R.id.speedboost_purchase_button);
-                button.setOnClickListener(v -> {
-                    try {
-                        Intent data = new Intent();
-                        data.putExtra(PURCHASE_SPEEDBOOST, true);
-                        data.putExtra(PURCHASE_SPEEDBOOST_OPTION, "1hr");
-                        getActivity().setResult(RESULT_OK, data);
-
-                        getActivity().finish();
-                    } catch (NullPointerException e) {
-
-                    }
-                });
-
- */
+        private int getSpeedBoostPurchaseDrawableResId(int priceValue) {
+            int[] backgrounds = {
+                    R.drawable.speedboost_background_orange,
+                    R.drawable.speedboost_background_pink,
+                    R.drawable.speedboost_background_purple,
+                    R.drawable.speedboost_background_blue,
+                    R.drawable.speedboost_background_light_blue,
+                    R.drawable.speedboost_background_fluoro_green,
+                    R.drawable.speedboost_background_orange_2,
+                    R.drawable.speedboost_background_yellow,
+                    R.drawable.speedboost_background_mint,
+            };
+            int index = ((priceValue / 100) - 1) % backgrounds.length;
+            return backgrounds[index];
         }
     }
 

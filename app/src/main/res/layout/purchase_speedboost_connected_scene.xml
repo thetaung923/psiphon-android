@@ -1,88 +1,19 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingBottom="100dp"
     android:fadeScrollbars="true">
-    <android.support.v7.widget.GridLayout xmlns:grid="http://schemas.android.com/apk/res-auto"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_centerHorizontal="true"
-        android:paddingTop="20dp"
-        grid:alignmentMode="alignBounds"
-        grid:columnCount="3">
 
-    <ImageView
-        android:layout_width="0dp"
-        android:layout_height="140dp"
-        android:gravity="center"
-        android:src="@drawable/speedboost_background_blue"
-        android:text="Some text"
-        grid:layout_columnWeight="1"
-        grid:layout_gravity="fill_horizontal" />
-    <ImageView
-        android:layout_width="0dp"
-        android:layout_height="140dp"
-        android:gravity="center"
-        android:src="@drawable/speedboost_background_fluoro_green"
-        android:text="Some text"
-        grid:layout_columnWeight="1"
-        grid:layout_gravity="fill_horizontal" />
-    <ImageView
-        android:layout_width="0dp"
-        android:layout_height="140dp"
-        android:gravity="center"
-        android:src="@drawable/speedboost_background_light_blue"
-        android:text="Some text"
-        grid:layout_columnWeight="1"
-        grid:layout_gravity="fill_horizontal" />
-    <ImageView
-        android:layout_width="0dp"
-        android:layout_height="140dp"
-        android:gravity="center"
-        android:src="@drawable/speedboost_background_mint"
-        android:text="Some text"
-        grid:layout_columnWeight="1"
-        grid:layout_gravity="fill_horizontal" />
-    <ImageView
-        android:layout_width="0dp"
-        android:layout_height="140dp"
-        android:gravity="center"
-        android:src="@drawable/speedboost_background_orange"
-        android:text="Some text"
-        grid:layout_columnWeight="1"
-        grid:layout_gravity="fill_horizontal" />
-    <ImageView
-        android:layout_width="0dp"
-        android:layout_height="140dp"
-        android:gravity="center"
-        android:src="@drawable/speedboost_background_orange_2"
-        android:text="Some text"
-        grid:layout_columnWeight="1"
-        grid:layout_gravity="fill_horizontal" />
-    <ImageView
-        android:layout_width="0dp"
-        android:layout_height="140dp"
-        android:gravity="center"
-        android:src="@drawable/speedboost_background_pink"
-        android:text="Some text"
-        grid:layout_columnWeight="1"
-        grid:layout_gravity="fill_horizontal" />
-    <ImageView
-        android:layout_width="0dp"
-        android:layout_height="140dp"
-        android:gravity="center"
-        android:src="@drawable/speedboost_background_purple"
-        android:text="Some text"
-        grid:layout_columnWeight="1"
-        grid:layout_gravity="fill_horizontal" />
-    <ImageView
-        android:layout_width="0dp"
-        android:layout_height="140dp"
-        android:gravity="center"
-        android:src="@drawable/speedboost_background_yellow"
-        android:text="Some text"
-        grid:layout_columnWeight="1"
-        grid:layout_gravity="fill_horizontal" />
-    </android.support.v7.widget.GridLayout>
+    <LinearLayout
+        android:orientation="vertical"
+        android:layout_width="wrap_content"
+        android:paddingBottom="10dp"
+        android:paddingTop="10dp"
+        android:layout_height="wrap_content">
 
+        <android.support.v7.widget.GridLayout xmlns:grid="http://schemas.android.com/apk/res-auto"
+            android:id="@+id/purchase_speedboost_grid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+    </LinearLayout>
 </ScrollView>
