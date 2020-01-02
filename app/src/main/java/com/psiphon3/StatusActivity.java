@@ -800,7 +800,11 @@ public class StatusActivity
                 Utils.MyLog.g("StatusActivity::onActivityResult: PaymentChooserActivity: canceled");
             }
         } else if (requestCode == PsiCashFragment.PSICASH_DETAILS_ACTIVITY_RESULT) {
-            psiCashFragment.onActivityResult(requestCode, resultCode, data);
+            if(data != null && data.hasExtra(PsiCashStoreActivity.SPEEDBOOST_CONNECT_PSIPHON_EXTRA)) {
+                startUp();
+            } else {
+                psiCashFragment.onActivityResult(requestCode, resultCode, data);
+            }
         } else {
             super.onActivityResult(requestCode, resultCode, data);
         }

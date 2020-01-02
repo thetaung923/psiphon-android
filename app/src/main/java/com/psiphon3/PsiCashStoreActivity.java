@@ -49,6 +49,8 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
     static final String PURCHASE_SPEEDBOOST_EXPECTED_PRICE = "PURCHASE_SPEEDBOOST_EXPECTED_PRICE";
     static final String PURCHASE_PSICASH = "PURCHASE_PSICASH";
     static final String PURCHASE_PSICASH_SKU_JSON = "PURCHASE_PSICASH_SKU_JSON";
+    public static final String SPEEDBOOST_CONNECT_PSIPHON_EXTRA = "SPEEDBOOST_CONNECT_PSIPHON_EXTRA";
+
 
     TabLayout tabLayout;
     ViewPager viewPager;
@@ -145,6 +147,24 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
             sceneTunnelNotConnected = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_not_connected_scene, getActivity());
             sceneTunnelConnected = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_connected_scene, getActivity());
 
+            sceneTunnelNotRunning.setEnterAction(() -> {
+                Button connectBtn = view.findViewById(R.id.connect_psiphon_btn);
+                connectBtn.setOnClickListener(v -> {
+                    final Activity activity = getActivity();
+                    if (activity == null ) {
+                        return;
+                    }
+                    try {
+                        Intent data = new Intent();
+                        data.putExtra(SPEEDBOOST_CONNECT_PSIPHON_EXTRA, true);
+                        activity.setResult(RESULT_OK, data);
+                        activity.finish();
+                    } catch (NullPointerException e) {
+                    }
+                });
+            });
+
+
             sceneTunnelConnected.setEnterAction(() -> {
                 compositeDisposable.add(
                         getPsiCashClientSingle(getActivity().getApplicationContext())
@@ -153,9 +173,7 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
                                 .observeOn(AndroidSchedulers.mainThread())
                                 .subscribe(
                                         psiCash -> populateSpeedboostPurchasesScreen(view, psiCash),
-                                        err -> {
-                                            Utils.MyLog.g("PurchaseSpeedBoostFragment: error getting local PsiCash state:" + err);
-                                        }
+                                        err -> Utils.MyLog.g("PurchaseSpeedBoostFragment: error getting local PsiCash state:" + err)
                                 ));
             });
 
