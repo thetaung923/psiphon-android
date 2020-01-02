@@ -34,10 +34,8 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center_horizontal|center"
-                android:layout_marginBottom="10dp"
                 android:alpha="1.0"
-                android:drawableStart="@drawable/psicash_coin_wrapped"
-                android:drawableLeft="@drawable/psicash_coin_wrapped" />
+                android:layout_marginBottom="10dp" />
         </LinearLayout>
 
     </RelativeLayout>

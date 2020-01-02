@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
 import android.support.design.widget.TabLayout;
@@ -24,13 +25,13 @@ import android.widget.RelativeLayout;
 import android.widget.TextView;
 
 import com.psiphon3.psicash.PsiCashClient;
+import com.psiphon3.psicash.PsiCashModel;
 import com.psiphon3.psiphonlibrary.LocalizedActivities;
 import com.psiphon3.psiphonlibrary.TunnelServiceInteractor;
 import com.psiphon3.psiphonlibrary.Utils;
 import com.psiphon3.subscription.R;
 
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 
 import ca.psiphon.psicashlib.PsiCashLib;
@@ -151,7 +152,7 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
                                 .subscribeOn(Schedulers.computation())
                                 .observeOn(AndroidSchedulers.mainThread())
                                 .subscribe(
-                                        psiCashModel -> populateSpeedboostPurchasesScreen(view, psiCashModel.purchasePrices()),
+                                        psiCash -> populateSpeedboostPurchasesScreen(view, psiCash),
                                         err -> {
                                             Utils.MyLog.g("PurchaseSpeedBoostFragment: error getting local PsiCash state:" + err);
                                         }
@@ -188,9 +189,9 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
             tunnelServiceInteractor.pause(getActivity().getApplicationContext());
         }
 
-        private void populateSpeedboostPurchasesScreen(View view, List<PsiCashLib.PurchasePrice> purchasePrices) {
+        private void populateSpeedboostPurchasesScreen(View view, PsiCashModel.PsiCash psiCash) {
             final Activity activity = getActivity();
-            if (activity == null) {
+            if (activity == null || psiCash == null) {
                 return;
             }
 
@@ -215,7 +216,12 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
                 }
             });
 
-            for (PsiCashLib.PurchasePrice price : purchasePrices) {
+            int balanceInteger  = (int) (Math.floor((long) (psiCash.balance() / 1e9)));
+
+            TextView balanceLabel = activity.findViewById(R.id.psicash_balance_label);
+            balanceLabel.setText(String.format(Locale.US, "%d", balanceInteger));
+
+            for (PsiCashLib.PurchasePrice price : psiCash.purchasePrices()) {
                 LinearLayout linearLayout = (LinearLayout) activity.getLayoutInflater().inflate(R.layout.speedboost_button_template, null);
                 RelativeLayout relativeLayout = linearLayout.findViewById(R.id.speedboost_relative_layout);
 
@@ -228,37 +234,54 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
                 durationLabel.setText(durationString);
 
                 Button button = linearLayout.findViewById(R.id.speedboost_purchase_button);
+
+                Drawable buttonDrawable = activity.getResources().getDrawable(R.drawable.psicash_coin).mutate();
+                buttonDrawable.setBounds(0,
+                        0,
+                        (int) (buttonDrawable.getIntrinsicWidth() * 0.7),
+                        (int) (buttonDrawable.getIntrinsicHeight() * 0.7));
+
+                button.setCompoundDrawables(buttonDrawable, null, null, null);
+
                 String priceTag = String.format(Locale.US, "%d", priceInteger);
                 button.setText(priceTag);
-                button.setOnClickListener(v -> {
-                    String confirmationMessage = String.format(
-                            activity.getString(R.string.lbl_confirm_speedboost_purchase),
-                            durationString,
-                            priceInteger
-                    );
 
-                    new AlertDialog.Builder(activity)
-                            .setIcon(R.drawable.psicash_coin)
-                            .setTitle(activity.getString(R.string.speed_boost_button_caption))
-                            .setMessage(confirmationMessage)
-                            .setNegativeButton(R.string.lbl_no, (dialog, which) -> {
-                            })
-                            .setPositiveButton(R.string.lbl_yes, (dialog, which) -> {
-                                try {
-                                    Intent data = new Intent();
-                                    data.putExtra(PURCHASE_SPEEDBOOST, true);
-                                    data.putExtra(PURCHASE_SPEEDBOOST_DISTINGUISHER, price.distinguisher);
-                                    data.putExtra(PURCHASE_SPEEDBOOST_EXPECTED_PRICE, price.price);
-                                    activity.setResult(RESULT_OK, data);
+                if(balanceInteger >= priceInteger) {
+                    buttonDrawable.setAlpha(255);
+                    button.setOnClickListener(v -> {
+                        String confirmationMessage = String.format(
+                                activity.getString(R.string.lbl_confirm_speedboost_purchase),
+                                durationString,
+                                priceInteger
+                        );
 
-                                    activity.finish();
-                                } catch (NullPointerException e) {
-                                }
-                            })
-                            .setCancelable(true)
-                            .create()
-                            .show();
-                });
+                        new AlertDialog.Builder(activity)
+                                .setIcon(R.drawable.psicash_coin)
+                                .setTitle(activity.getString(R.string.speed_boost_button_caption))
+                                .setMessage(confirmationMessage)
+                                .setNegativeButton(R.string.lbl_no, (dialog, which) -> {
+                                })
+                                .setPositiveButton(R.string.lbl_yes, (dialog, which) -> {
+                                    try {
+                                        Intent data = new Intent();
+                                        data.putExtra(PURCHASE_SPEEDBOOST, true);
+                                        data.putExtra(PURCHASE_SPEEDBOOST_DISTINGUISHER, price.distinguisher);
+                                        data.putExtra(PURCHASE_SPEEDBOOST_EXPECTED_PRICE, price.price);
+                                        activity.setResult(RESULT_OK, data);
+
+                                        activity.finish();
+                                    } catch (NullPointerException e) {
+                                    }
+                                })
+                                .setCancelable(true)
+                                .create()
+                                .show();
+                    });
+                } else {
+                    buttonDrawable.setAlpha(127);
+                    button.setCompoundDrawables(buttonDrawable, null, null, null);
+                    button.setEnabled(false);
+                }
 
                 gridLayout.addView(linearLayout);
             }
