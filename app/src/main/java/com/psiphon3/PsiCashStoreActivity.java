@@ -24,6 +24,8 @@ import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
 
+import com.android.billingclient.api.SkuDetails;
+import com.psiphon3.billing.BillingRepository;
 import com.psiphon3.psicash.PsiCashClient;
 import com.psiphon3.psicash.PsiCashModel;
 import com.psiphon3.psiphonlibrary.LocalizedActivities;
@@ -31,7 +33,12 @@ import com.psiphon3.psiphonlibrary.TunnelServiceInteractor;
 import com.psiphon3.psiphonlibrary.Utils;
 import com.psiphon3.subscription.R;
 
+import org.json.JSONException;
+
+import java.text.NumberFormat;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
 
 import ca.psiphon.psicashlib.PsiCashLib;
@@ -143,15 +150,16 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
 
             sceneRoot = (ViewGroup) view.findViewById(R.id.scene_root);
 
-            sceneTunnelNotRunning = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_not_running_scene, getActivity());
-            sceneTunnelNotConnected = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_not_connected_scene, getActivity());
-            sceneTunnelConnected = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_connected_scene, getActivity());
+            Context ctx = container.getContext();
+            sceneTunnelNotRunning = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_not_running_scene, ctx);
+            sceneTunnelNotConnected = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_not_connected_scene, ctx);
+            sceneTunnelConnected = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_connected_scene, ctx);
 
             sceneTunnelNotRunning.setEnterAction(() -> {
                 Button connectBtn = view.findViewById(R.id.connect_psiphon_btn);
                 connectBtn.setOnClickListener(v -> {
                     final Activity activity = getActivity();
-                    if (activity == null ) {
+                    if (activity == null) {
                         return;
                     }
                     try {
@@ -167,7 +175,7 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
 
             sceneTunnelConnected.setEnterAction(() -> {
                 compositeDisposable.add(
-                        getPsiCashClientSingle(getActivity().getApplicationContext())
+                        getPsiCashClientSingle(ctx)
                                 .flatMapObservable(PsiCashClient::getPsiCashLocal)
                                 .subscribeOn(Schedulers.computation())
                                 .observeOn(AndroidSchedulers.mainThread())
@@ -177,7 +185,7 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
                                 ));
             });
 
-            tunnelServiceInteractor = new TunnelServiceInteractor(getActivity().getApplicationContext());
+            tunnelServiceInteractor = new TunnelServiceInteractor(ctx);
             tunnelServiceInteractor.tunnelStateFlowable()
                     .filter(state -> !state.isUnknown())
                     .distinctUntilChanged()
@@ -222,36 +230,36 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
                 columnCount = 3;
             }
 
-            GridLayout gridLayout = view.findViewById(R.id.purchase_speedboost_grid);
-            gridLayout.setColumnCount(columnCount);
-            gridLayout.post(() -> {
-                for (int i = 0; i < gridLayout.getChildCount(); i++) {
-                    View child = gridLayout.getChildAt(i);
+            GridLayout containerLayout = view.findViewById(R.id.purchase_speedboost_grid);
+            containerLayout.setColumnCount(columnCount);
+            containerLayout.post(() -> {
+                for (int i = 0; i < containerLayout.getChildCount(); i++) {
+                    View child = containerLayout.getChildAt(i);
                     ViewGroup.LayoutParams params = child.getLayoutParams();
-                    params.width = gridLayout.getWidth() / columnCount;
+                    params.width = containerLayout.getWidth() / columnCount;
                     params.height = params.width * 248 / 185;
                     child.setLayoutParams(params);
                 }
             });
 
-            int balanceInteger  = (int) (Math.floor((long) (psiCash.balance() / 1e9)));
+            int balanceInteger = (int) (Math.floor((long) (psiCash.balance() / 1e9)));
 
             TextView balanceLabel = activity.findViewById(R.id.psicash_balance_label);
             balanceLabel.setText(String.format(Locale.US, "%d", balanceInteger));
 
             for (PsiCashLib.PurchasePrice price : psiCash.purchasePrices()) {
-                LinearLayout linearLayout = (LinearLayout) activity.getLayoutInflater().inflate(R.layout.speedboost_button_template, null);
-                RelativeLayout relativeLayout = linearLayout.findViewById(R.id.speedboost_relative_layout);
+                LinearLayout speedboostItemLayout = (LinearLayout) activity.getLayoutInflater().inflate(R.layout.speedboost_button_template, null);
+                RelativeLayout relativeLayout = speedboostItemLayout.findViewById(R.id.speedboost_relative_layout);
 
                 final int priceInteger = (int) (Math.floor((long) (price.price / 1e9)));
                 int drawableResId = getSpeedBoostPurchaseDrawableResId(priceInteger);
                 relativeLayout.setBackgroundResource(drawableResId);
 
-                TextView durationLabel = linearLayout.findViewById(R.id.speedboost_purchase_label);
+                TextView durationLabel = speedboostItemLayout.findViewById(R.id.speedboost_purchase_label);
                 final String durationString = getDurationString(price.distinguisher);
                 durationLabel.setText(durationString);
 
-                Button button = linearLayout.findViewById(R.id.speedboost_purchase_button);
+                Button button = speedboostItemLayout.findViewById(R.id.speedboost_purchase_button);
 
                 Drawable buttonDrawable = activity.getResources().getDrawable(R.drawable.psicash_coin).mutate();
                 buttonDrawable.setBounds(0,
@@ -264,7 +272,7 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
                 String priceTag = String.format(Locale.US, "%d", priceInteger);
                 button.setText(priceTag);
 
-                if(balanceInteger >= priceInteger) {
+                if (balanceInteger >= priceInteger) {
                     buttonDrawable.setAlpha(255);
                     button.setOnClickListener(v -> {
                         String confirmationMessage = String.format(
@@ -301,7 +309,7 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
                     button.setEnabled(false);
                 }
 
-                gridLayout.addView(linearLayout);
+                containerLayout.addView(speedboostItemLayout);
             }
         }
 
@@ -317,10 +325,10 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
                     R.drawable.speedboost_background_purple,
                     R.drawable.speedboost_background_blue,
                     R.drawable.speedboost_background_light_blue,
-                    R.drawable.speedboost_background_fluoro_green,
+                    R.drawable.speedboost_background_mint,
                     R.drawable.speedboost_background_orange_2,
                     R.drawable.speedboost_background_yellow,
-                    R.drawable.speedboost_background_mint,
+                    R.drawable.speedboost_background_fluoro_green,
             };
             int index = ((priceValue / 100) - 1) % backgrounds.length;
             return backgrounds[index];
@@ -333,7 +341,56 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
                                  Bundle savedInstanceState) {
             View view = inflater.inflate(R.layout.purchase_psicash_fragment, container, false);
 
-            ArrayList<String> jsonSkuDetails = getArguments().getStringArrayList(PSICASH_SKU_DETAILS_LIST_EXTRA);
+            LinearLayout containerLayout = view.findViewById(R.id.psicash_purchase_options_container);
+
+            // Add "Watch ad to earn 35 PsiCash" button
+            View psicashPurchaseItemView = inflater.inflate(R.layout.psicash_purchase_template, container, false);
+
+            ((TextView) psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_title)).setText(R.string.psicash_purchase_free_name);
+            ((TextView) psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_description)).setText(R.string.psicash_purchase_free_description);
+            ((Button) psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_price)).setText(R.string.psicash_purchase_free_button_price);
+
+            containerLayout.addView(psicashPurchaseItemView);
+
+            List<SkuDetails> skuDetailsList = new ArrayList<>();
+            Bundle data = getArguments();
+            if (data != null) {
+                List<String> jsonSkuDetailsList = data.getStringArrayList(PSICASH_SKU_DETAILS_LIST_EXTRA);
+                jsonSkuDetailsList = jsonSkuDetailsList == null ? Collections.emptyList() : jsonSkuDetailsList;
+                for (String jsonSkuDetails : jsonSkuDetailsList) {
+                    SkuDetails skuDetails;
+                    try {
+                        skuDetails = new SkuDetails(jsonSkuDetails);
+                        skuDetailsList.add(skuDetails);
+                    } catch (JSONException e) {
+                        Utils.MyLog.g("PsiCashStoreActivity: error parsing SkuDetails: " + e);
+                    }
+                }
+            }
+
+            Collections.sort(skuDetailsList, (skuDetails, t1) -> {
+                if (skuDetails.getPriceAmountMicros() >= t1.getPriceAmountMicros())
+                    return 1;
+                else if (skuDetails.getPriceAmountMicros() <= t1.getPriceAmountMicros())
+                    return -1;
+                else return 0;
+            });
+
+            for (SkuDetails skuDetails : skuDetailsList) {
+                int itemValue = 0;
+                try {
+                    itemValue = BillingRepository.IAB_PSICASH_SKUS_TO_VALUE.get(skuDetails.getSku());
+                } catch (NullPointerException e) {
+                    Utils.MyLog.g("PsiCashStoreActivity: error getting price for sku: " + skuDetails.getSku());
+                }
+                String itemTitle = NumberFormat.getInstance().format(itemValue);
+                psicashPurchaseItemView = inflater.inflate(R.layout.psicash_purchase_template, container, false);
+
+                ((TextView) psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_title)).setText(itemTitle);
+                ((TextView) psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_description)).setText(skuDetails.getDescription());
+                ((Button) psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_price)).setText(skuDetails.getPrice());
+                containerLayout.addView(psicashPurchaseItemView);
+            }
 
             return view;
         }

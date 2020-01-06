@@ -74,10 +74,14 @@ public class BillingRepository {
         IAB_TIMEPASS_SKUS_TO_DAYS = Collections.unmodifiableMap(m);
     }
 
-    static public final Map<String, Long> IAB_PSICASH_SKUS_TO_VALUE;
+    static public final Map<String, Integer> IAB_PSICASH_SKUS_TO_VALUE;
     static {
-        Map<String, Long> m = new HashMap<>();
-        m.put("psicash_tier_1", 100L);
+        Map<String, Integer> m = new HashMap<>();
+        m.put("psicash_1000", 1000);
+        m.put("psicash_5000", 5000);
+        m.put("psicash_10000", 10000);
+        m.put("psicash_30000", 30000);
+        m.put("psicash_100000", 100000);
         IAB_PSICASH_SKUS_TO_VALUE = Collections.unmodifiableMap(m);
     }
 

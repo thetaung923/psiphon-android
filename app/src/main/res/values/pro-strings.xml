@@ -239,4 +239,7 @@
     'turbo' (like cars), 'accelerate', 'warp speed', 'blast off', or anything that indicates a fast or unrestricted speed.-->
     <string name="speed_boost_button_caption">Speed Boost</string>
     <string name="lbl_confirm_speedboost_purchase">Would you like to purchase %s Speed Boost for %d PsiCash?</string>
+    <string name="psicash_purchase_free_description">Watch video and earn</string>
+    <string name="psicash_purchase_free_button_price">Free</string>
+    <string name="psicash_store_disclaimer">This is where the psicash account disclaimer would go. Don’t uninstsall the app or you will lose your Psicash.</string>
 </resources>
