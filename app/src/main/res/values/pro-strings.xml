@@ -242,4 +242,8 @@
     <string name="psicash_purchase_free_description">Watch video and earn</string>
     <string name="psicash_purchase_free_button_price">Free</string>
     <string name="psicash_store_disclaimer">This is where the psicash account disclaimer would go. Don’t uninstsall the app or you will lose your Psicash.</string>
+    <string name="speed_boost_unavailable">Speed Boost Unavailable</string>
+    <string name="connect_to_psiphon_to_use_speed_boost">Connect to Psiphon to use Speed Boost.</string>
+    <string name="connect_to_psiphon_button_text">Connect to Psiphon</string>
+    <string name="wait_for_psiphon_to_finish_connect_to_use_speed_boost">Please wait for tunnel to finish connecting to use Speed Boost</string>
 </resources>

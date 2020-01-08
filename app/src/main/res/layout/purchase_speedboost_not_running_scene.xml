@@ -28,7 +28,7 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/imageView"
-        android:text="Speed Boost Unavailable" />
+        android:text="@string/speed_boost_unavailable" />
 
     <TextView
         android:id="@+id/textView5"
@@ -41,13 +41,13 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/textView4"
-        android:text="Connect to Psiphon to use Speed Boost." />
+        android:text="@string/connect_to_psiphon_to_use_speed_boost" />
 
     <Button
         android:id="@+id/connect_psiphon_btn"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="Connect to Psiphon"
+        android:text="@string/connect_to_psiphon_button_text"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintHorizontal_bias="0.5"
