@@ -62,6 +62,7 @@ import com.psiphon3.psicash.PsiCashClient;
 import com.psiphon3.psicash.PsiCashException;
 import com.psiphon3.psicash.PsiCashIntent;
 import com.psiphon3.psicash.PsiCashListener;
+import com.psiphon3.psicash.PsiCashStoreActivity;
 import com.psiphon3.psicash.PsiCashViewModel;
 import com.psiphon3.psicash.PsiCashViewModelFactory;
 import com.psiphon3.psicash.PsiCashViewState;

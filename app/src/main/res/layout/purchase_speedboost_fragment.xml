@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    tools:context="com.psiphon3.PsiCashStoreActivity">
+    tools:context="com.psiphon3.psicash.PsiCashStoreActivity">
 
     <FrameLayout
         android:id="@+id/scene_root"
