@@ -55,7 +55,8 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
     static final String PURCHASE_SPEEDBOOST_DISTINGUISHER = "PURCHASE_SPEEDBOOST_DISTINGUISHER";
     static final String PURCHASE_SPEEDBOOST_EXPECTED_PRICE = "PURCHASE_SPEEDBOOST_EXPECTED_PRICE";
     static final String PURCHASE_PSICASH = "PURCHASE_PSICASH";
-    static final String PURCHASE_PSICASH_SKU_JSON = "PURCHASE_PSICASH_SKU_JSON";
+    static final String PURCHASE_PSICASH_GET_FREE = "PURCHASE_PSICASH_GET_FREE";
+    static final String PURCHASE_PSICASH_SKU_DETAILS_JSON = "PURCHASE_PSICASH_SKU_DETAILS_JSON";
     public static final String SPEEDBOOST_CONNECT_PSIPHON_EXTRA = "SPEEDBOOST_CONNECT_PSIPHON_EXTRA";
 
 
@@ -348,7 +349,23 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
 
             ((TextView) psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_title)).setText(R.string.psicash_purchase_free_name);
             ((TextView) psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_description)).setText(R.string.psicash_purchase_free_description);
-            ((Button) psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_price)).setText(R.string.psicash_purchase_free_button_price);
+
+            Button btn = psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_price);
+            btn.setText(R.string.psicash_purchase_free_button_price);
+            btn.setOnClickListener(v -> {
+                final Activity activity = getActivity();
+                if (activity == null) {
+                    return;
+                }
+
+                try {
+                    Intent data = new Intent();
+                    data.putExtra(PURCHASE_PSICASH_GET_FREE, true);
+                    activity.setResult(RESULT_OK, data);
+                    activity.finish();
+                } catch (NullPointerException e) {
+                }
+            });
 
             containerLayout.addView(psicashPurchaseItemView);
 
@@ -388,7 +405,28 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
 
                 ((TextView) psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_title)).setText(itemTitle);
                 ((TextView) psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_description)).setText(skuDetails.getDescription());
-                ((Button) psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_price)).setText(skuDetails.getPrice());
+
+                btn = psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_price);
+                btn.setText(skuDetails.getPrice());
+                btn.setOnClickListener(v -> {
+                    final Activity activity = getActivity();
+                    if (activity == null) {
+                        return;
+                    }
+
+                    try {
+                        Intent intentData = new Intent();
+                        intentData.putExtra(PURCHASE_PSICASH, true);
+                        intentData.putExtra(PURCHASE_PSICASH_SKU_DETAILS_JSON, skuDetails.getOriginalJson());
+                        activity.setResult(RESULT_OK, intentData);
+                        activity.finish();
+                    } catch (NullPointerException e) {
+                    }
+                });
+
+
+
+
                 containerLayout.addView(psicashPurchaseItemView);
             }
 

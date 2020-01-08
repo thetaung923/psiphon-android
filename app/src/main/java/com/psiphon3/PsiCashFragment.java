@@ -133,21 +133,19 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
                 return;
             }
             if (data.hasExtra(PsiCashStoreActivity.PURCHASE_PSICASH)) {
-                String skuString = data.getStringExtra(PsiCashStoreActivity.PURCHASE_PSICASH_SKU_JSON);
+                String skuString = data.getStringExtra(PsiCashStoreActivity.PURCHASE_PSICASH_SKU_DETAILS_JSON);
                 try {
                     if (TextUtils.isEmpty(skuString)) {
                         throw new IllegalArgumentException("SKU is empty.");
                     }
                     SkuDetails skuDetails = new SkuDetails(skuString);
-//                    psiCashPurchaseRelay.accept(skuDetails);
+                    billingViewModel.launchFlow(getActivity(), skuDetails).subscribe();
                 } catch (JSONException | IllegalArgumentException e) {
                     Utils.MyLog.g("PsiCashFragment::onActivityResult purchase SKU error: " + e);
                 }
 
             } else if (data.hasExtra(PsiCashStoreActivity.PURCHASE_SPEEDBOOST)) {
-                String skuString = data.getStringExtra(PsiCashStoreActivity.PURCHASE_PSICASH_SKU_JSON);
-
-//                speedBoostPurchaseRelay.accept()
+                // TODO: implement this
             }
         } else {
             super.onActivityResult(requestCode, resultCode, data);
