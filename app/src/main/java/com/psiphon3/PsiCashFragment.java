@@ -47,7 +47,6 @@ import android.view.ViewPropertyAnimator;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.ProgressBar;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
 
@@ -111,7 +110,7 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
     private TextView balanceLabel;
     private Button speedBoostBtn;
     private CountDownTimer countDownTimer;
-    private ProgressBar progressBar;
+    private View progressOverlay;
     private int currentUiBalance;
     private boolean animateOnBalanceChange = false;
 
@@ -196,8 +195,7 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
     public void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
         RewardedVideoClient.getInstance().initWithActivity(getActivity());
-        progressBar = getActivity().findViewById(R.id.progress_view);
-        progressBar.setIndeterminate(true);
+        progressOverlay = getActivity().findViewById(R.id.progress_overlay);
         speedBoostBtn = getActivity().findViewById(R.id.purchase_speedboost_btn);
         balanceLabel = getActivity().findViewById(R.id.psicash_balance_label);
         balanceLabel.setText("0");
@@ -514,9 +512,9 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
 
     private void updateUiProgressView(PsiCashViewState state) {
         if (state.psiCashTransactionInFlight() || state.videoIsLoading()) {
-            progressBar.setVisibility(View.VISIBLE);
+            Utils.animateView(progressOverlay, View.VISIBLE, 0.7f, 200);
         } else {
-            progressBar.setVisibility(View.INVISIBLE);
+            Utils.animateView(progressOverlay, View.INVISIBLE, 0f, 200);
         }
     }
 
