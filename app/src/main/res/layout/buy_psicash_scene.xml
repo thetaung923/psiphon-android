@@ -29,5 +29,4 @@
                 android:text="@string/psicash_store_disclaimer"/>
         </LinearLayout>
     </LinearLayout>
-
 </ScrollView>
