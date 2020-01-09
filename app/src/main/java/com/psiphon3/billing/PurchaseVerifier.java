@@ -4,7 +4,6 @@ import android.content.Context;
 import android.text.TextUtils;
 import android.util.Pair;
 
-import com.android.billingclient.api.BillingClient;
 import com.android.billingclient.api.Purchase;
 import com.jakewharton.rxrelay2.BehaviorRelay;
 import com.jakewharton.rxrelay2.PublishRelay;
@@ -33,7 +32,7 @@ public class PurchaseVerifier {
     private final AppPreferences appPreferences;
     private final Context context;
     private final PurchaseAuthorizationListener purchaseAuthorizationListener;
-    private BillingRepository repository;
+    private GooglePlayBillingHelper repository;
 
     private PublishRelay<Pair<Boolean, Integer>> tunnelConnectionStatePublishRelay = PublishRelay.create();
     private BehaviorRelay<SubscriptionState> subscriptionStateBehaviorRelay = BehaviorRelay.create();
@@ -42,91 +41,11 @@ public class PurchaseVerifier {
     public PurchaseVerifier(Context context, PurchaseAuthorizationListener purchaseAuthorizationListener) {
         this.context = context;
         this.appPreferences = new AppPreferences(context);
-        this.repository = BillingRepository.getInstance(context);
+        this.repository = GooglePlayBillingHelper.getInstance(context);
         this.purchaseAuthorizationListener = purchaseAuthorizationListener;
-    }
 
-    public void startIab() {
-        compositeDisposable.addAll(
-                purchaseUpdatesDisposable(),
-                purchaseVerificationDisposable()
-        );
+        compositeDisposable.add(purchaseVerificationDisposable());
         queryCurrentSubscriptionStatus();
-    }
-
-    private Disposable purchaseUpdatesDisposable() {
-        return repository.observeUpdates()
-                .subscribe(
-                        purchasesUpdate -> {
-                            if (purchasesUpdate.responseCode() == BillingClient.BillingResponseCode.OK) {
-                                processPurchases(purchasesUpdate.purchases());
-                            } else if (purchasesUpdate.responseCode() == BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED) {
-                                queryCurrentSubscriptionStatus();
-                            } else {
-                                Utils.MyLog.g("PurchaseVerifier::observeUpdates purchase update error response code: " + purchasesUpdate.responseCode());
-                            }
-                        },
-                        err -> {
-                            subscriptionStateBehaviorRelay.accept(SubscriptionState.billingError(err));
-                        }
-                );
-    }
-
-    private void processPurchases(List<Purchase> purchaseList) {
-        if (purchaseList == null || purchaseList.size() == 0) {
-            subscriptionStateBehaviorRelay.accept(SubscriptionState.noSubscription());
-            return;
-        }
-
-        for (Purchase purchase : purchaseList) {
-            // Skip purchase with pending or unspecified state.
-            if (purchase.getPurchaseState() != Purchase.PurchaseState.PURCHASED) {
-                continue;
-            }
-
-            // Skip purchases that don't pass signature verification.
-            if (!Security.verifyPurchase(BillingRepository.IAB_PUBLIC_KEY,
-                    purchase.getOriginalJson(), purchase.getSignature())) {
-                Utils.MyLog.g("PurchaseVerifier::processPurchases: failed on-device verification for purchase: " + purchase);
-                continue;
-            }
-
-            if (BillingRepository.hasUnlimitedSubscription(purchase)) {
-                subscriptionStateBehaviorRelay.accept(SubscriptionState.unlimitedSubscription(purchase));
-                return;
-            } else if (BillingRepository.hasLimitedSubscription(purchase)) {
-                subscriptionStateBehaviorRelay.accept(SubscriptionState.limitedSubscription(purchase));
-                return;
-            } else if (BillingRepository.hasTimePass(purchase)) {
-                subscriptionStateBehaviorRelay.accept(SubscriptionState.timePass(purchase));
-                return;
-            }
-        }
-        subscriptionStateBehaviorRelay.accept(SubscriptionState.noSubscription());
-    }
-
-    public void queryCurrentSubscriptionStatus() {
-        compositeDisposable.add(
-                Single.mergeDelayError(repository.getSubscriptions(), repository.getPurchases())
-                        .toList()
-                        .map(listOfLists -> {
-                            List<Purchase> purchaseList = new ArrayList<>();
-                            for (List<Purchase> list : listOfLists) {
-                                purchaseList.addAll(list);
-                            }
-                            return purchaseList;
-                        })
-                        .subscribe(
-                                this::processPurchases,
-                                err -> subscriptionStateBehaviorRelay.accept(SubscriptionState.billingError(err))
-                        )
-        );
-    }
-
-    public Flowable<SubscriptionState> subscriptionStateFlowable() {
-        return subscriptionStateBehaviorRelay
-                .distinctUntilChanged()
-                .toFlowable(BackpressureStrategy.LATEST);
     }
 
     private Flowable<Pair<Boolean, Integer>> tunnelConnectionStateFlowable() {
@@ -146,7 +65,7 @@ public class PurchaseVerifier {
                     }
                     // Once connected run IAB check and pass the subscription state and
                     // current http proxy port downstream.
-                    return subscriptionStateFlowable()
+                    return repository.subscriptionStateFlowable()
                             .map(subscriptionState -> new Pair<>(subscriptionState, httpProxyPort));
                 })
                 .switchMap(pair -> {
@@ -174,8 +93,8 @@ public class PurchaseVerifier {
                     appPreferences.put(PREFERENCE_PURCHASE_AUTHORIZATION_ID, "");
 
                     // Now try and fetch authorization for this purchase
-                    boolean isSubscription = BillingRepository.hasUnlimitedSubscription(purchase)
-                            || BillingRepository.hasLimitedSubscription(purchase);
+                    boolean isSubscription = GooglePlayBillingHelper.hasUnlimitedSubscription(purchase)
+                            || GooglePlayBillingHelper.hasLimitedSubscription(purchase);
 
                     PurchaseVerificationNetworkHelper purchaseVerificationNetworkHelper =
                             new PurchaseVerificationNetworkHelper.Builder(context)
@@ -241,7 +160,7 @@ public class PurchaseVerifier {
     }
 
     public Single<String> sponsorIdSingle() {
-        return subscriptionStateFlowable()
+        return repository.subscriptionStateFlowable()
                 .firstOrError()
                 .doOnSuccess(subscriptionState ->
                         Utils.MyLog.g("PurchaseVerifier: will start with "
@@ -272,7 +191,7 @@ public class PurchaseVerifier {
             Utils.MyLog.g("PurchaseVerifier: persisted purchase authorization ID is not active, will query subscription status.");
             appPreferences.put(PREFERENCE_PURCHASE_TOKEN, "");
             appPreferences.put(PREFERENCE_PURCHASE_AUTHORIZATION_ID, "");
-            queryCurrentSubscriptionStatus();
+            repository.queryCurrentSubscriptionStatus();
         } else {
             Utils.MyLog.g("PurchaseVerifier: subscription authorization accepted, continue.");
         }
@@ -280,6 +199,11 @@ public class PurchaseVerifier {
 
     public void onDestroy() {
         compositeDisposable.dispose();
+    }
+
+    public void queryCurrentSubscriptionStatus() {
+        repository.startIab();
+        repository.queryCurrentSubscriptionStatus();
     }
 
     public enum UpdateConnectionAction {

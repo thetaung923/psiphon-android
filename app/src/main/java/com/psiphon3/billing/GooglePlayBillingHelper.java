@@ -36,10 +36,12 @@ import com.android.billingclient.api.Purchase;
 import com.android.billingclient.api.PurchasesUpdatedListener;
 import com.android.billingclient.api.SkuDetails;
 import com.android.billingclient.api.SkuDetailsParams;
+import com.jakewharton.rxrelay2.BehaviorRelay;
 import com.jakewharton.rxrelay2.PublishRelay;
 import com.psiphon3.psiphonlibrary.Utils;
 import com.psiphon3.subscription.BuildConfig;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -51,8 +53,10 @@ import io.reactivex.Completable;
 import io.reactivex.Flowable;
 import io.reactivex.Single;
 import io.reactivex.android.schedulers.AndroidSchedulers;
+import io.reactivex.disposables.CompositeDisposable;
+import io.reactivex.disposables.Disposable;
 
-public class BillingRepository {
+public class GooglePlayBillingHelper {
     static public final String IAB_PUBLIC_KEY = BuildConfig.IAB_PUBLIC_KEY;
     static public final String IAB_LIMITED_MONTHLY_SUBSCRIPTION_SKU = "speed_limited_ad_free_subscription";
     static public final String IAB_UNLIMITED_MONTHLY_SUBSCRIPTION_SKU = "basic_ad_free_subscription_5";
@@ -66,6 +70,7 @@ public class BillingRepository {
     };
 
     static public final Map<String, Long> IAB_TIMEPASS_SKUS_TO_DAYS;
+
     static {
         Map<String, Long> m = new HashMap<>();
         m.put("basic_ad_free_7_day_timepass", 7L);
@@ -75,6 +80,7 @@ public class BillingRepository {
     }
 
     static public final Map<String, Integer> IAB_PSICASH_SKUS_TO_VALUE;
+
     static {
         Map<String, Integer> m = new HashMap<>();
         m.put("psicash_1000", 1000);
@@ -85,12 +91,21 @@ public class BillingRepository {
         IAB_PSICASH_SKUS_TO_VALUE = Collections.unmodifiableMap(m);
     }
 
-    private static BillingRepository INSTANCE = null;
+    private static GooglePlayBillingHelper INSTANCE = null;
     private final Flowable<BillingClient> connectionFlowable;
     private PublishRelay<PurchasesUpdate> purchasesUpdatedRelay;
 
-    private BillingRepository(final Context ctx) {
+    private CompositeDisposable compositeDisposable;
+    private BehaviorRelay<SubscriptionState> subscriptionStateBehaviorRelay;
+    private BehaviorRelay<List<SkuDetails>> allSkuDetailsBehaviorRelay;
+    private Disposable startIabDisposable;
+
+
+    private GooglePlayBillingHelper(final Context ctx) {
         purchasesUpdatedRelay = PublishRelay.create();
+        compositeDisposable = new CompositeDisposable();
+        subscriptionStateBehaviorRelay = BehaviorRelay.create();
+        allSkuDetailsBehaviorRelay = BehaviorRelay.create();
 
         PurchasesUpdatedListener listener = (billingResult, purchases) -> {
             @BillingResponseCode int responseCode = billingResult.getResponseCode();
@@ -141,11 +156,131 @@ public class BillingRepository {
                         .refCount(); // keep connection if at least one observer exists
     }
 
-    public static BillingRepository getInstance(final Context context) {
+    public static GooglePlayBillingHelper getInstance(final Context context) {
         if (INSTANCE == null) {
-            INSTANCE = new BillingRepository(context);
+            INSTANCE = new GooglePlayBillingHelper(context);
         }
         return INSTANCE;
+    }
+
+    public Flowable<SubscriptionState> subscriptionStateFlowable() {
+        return subscriptionStateBehaviorRelay
+                .toFlowable(BackpressureStrategy.LATEST);
+    }
+
+    public Single<List<SkuDetails>> allSkuDetailsSingle() {
+        return allSkuDetailsBehaviorRelay
+                .firstOrError();
+    }
+
+    public void startIab() {
+        if (startIabDisposable != null && !startIabDisposable.isDisposed()) {
+            // already subscribed to updates, do nothing
+            return;
+        }
+        startIabDisposable = observeUpdates()
+                .subscribe(
+                        purchasesUpdate -> {
+                            if (purchasesUpdate.responseCode() == BillingClient.BillingResponseCode.OK) {
+                                processPurchases(purchasesUpdate.purchases());
+                            } else if (purchasesUpdate.responseCode() == BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED) {
+                                queryCurrentSubscriptionStatus();
+                            } else {
+                                Utils.MyLog.g("BillingRepository::observeUpdates purchase update error response code: " + purchasesUpdate.responseCode());
+                            }
+                        },
+                        err -> {
+                            subscriptionStateBehaviorRelay.accept(SubscriptionState.billingError(err));
+                        }
+                );
+
+        compositeDisposable.add(startIabDisposable);
+    }
+
+    private Single<List<SkuDetails>> getConsumablesSkuDetails() {
+        List<String> ids = new ArrayList<>(GooglePlayBillingHelper.IAB_TIMEPASS_SKUS_TO_DAYS.keySet());
+        ids.addAll(new ArrayList<>(GooglePlayBillingHelper.IAB_PSICASH_SKUS_TO_VALUE.keySet()));
+        return getSkuDetails(ids, BillingClient.SkuType.INAPP);
+    }
+
+    private Single<List<SkuDetails>> getSubscriptionsSkuDetails() {
+        List<String> ids = Arrays.asList(
+                GooglePlayBillingHelper.IAB_LIMITED_MONTHLY_SUBSCRIPTION_SKU,
+                GooglePlayBillingHelper.IAB_UNLIMITED_MONTHLY_SUBSCRIPTION_SKU
+        );
+        return getSkuDetails(ids, BillingClient.SkuType.SUBS);
+    }
+
+    public void queryAllSkuDetails() {
+        compositeDisposable.add(
+                Single.mergeDelayError(getSubscriptionsSkuDetails(), getConsumablesSkuDetails())
+                        .flatMapIterable(skuDetails -> skuDetails)
+                        .toList()
+                        .onErrorReturnItem(Collections.emptyList())
+                        .subscribe(allSkuDetailsBehaviorRelay)
+        );
+    }
+
+    public void queryCurrentSubscriptionStatus() {
+        compositeDisposable.add(
+                Single.mergeDelayError(getSubscriptions(), getPurchases())
+                        .toList()
+                        .map(listOfLists -> {
+                            List<Purchase> purchaseList = new ArrayList<>();
+                            for (List<Purchase> list : listOfLists) {
+                                purchaseList.addAll(list);
+                            }
+                            return purchaseList;
+                        })
+                        .subscribe(
+                                this::processPurchases,
+                                err -> subscriptionStateBehaviorRelay.accept(SubscriptionState.billingError(err))
+                        )
+        );
+    }
+
+    private void processPurchases(List<Purchase> purchaseList) {
+        if (purchaseList == null || purchaseList.size() == 0) {
+            subscriptionStateBehaviorRelay.accept(SubscriptionState.noSubscription());
+            return;
+        }
+
+        for (Purchase purchase : purchaseList) {
+            // Skip purchase with pending or unspecified state.
+            if (purchase.getPurchaseState() != Purchase.PurchaseState.PURCHASED) {
+                continue;
+            }
+
+            // Skip purchases that don't pass signature verification.
+            if (!Security.verifyPurchase(GooglePlayBillingHelper.IAB_PUBLIC_KEY,
+                    purchase.getOriginalJson(), purchase.getSignature())) {
+                Utils.MyLog.g("StatusActivityBillingViewModel::processPurchases: failed verification for purchase: " + purchase);
+                continue;
+            }
+
+            // From Google sample app:
+            // If you do not acknowledge a purchase, the Google Play Store will provide a refund to the
+            // users within a few days of the transaction. Therefore you have to implement
+            // [BillingClient.acknowledgePurchaseAsync] inside your app.
+            compositeDisposable.add(acknowledgePurchase(purchase).subscribe());
+
+            if (GooglePlayBillingHelper.hasUnlimitedSubscription(purchase)) {
+                subscriptionStateBehaviorRelay.accept(SubscriptionState.unlimitedSubscription(purchase));
+                return;
+            } else if (GooglePlayBillingHelper.hasLimitedSubscription(purchase)) {
+                subscriptionStateBehaviorRelay.accept(SubscriptionState.limitedSubscription(purchase));
+                return;
+            } else if (GooglePlayBillingHelper.hasTimePass(purchase)) {
+                subscriptionStateBehaviorRelay.accept(SubscriptionState.timePass(purchase));
+                return;
+            }
+            // Check if this purchase is an expired timepass which needs to be consumed
+            if (GooglePlayBillingHelper.IAB_TIMEPASS_SKUS_TO_DAYS.containsKey(purchase.getSku())) {
+                compositeDisposable.add(consumePurchase(purchase).subscribe());
+            }
+        }
+
+        subscriptionStateBehaviorRelay.accept(SubscriptionState.noSubscription());
     }
 
     Flowable<PurchasesUpdate> observeUpdates() {
@@ -153,11 +288,11 @@ public class BillingRepository {
                 purchasesUpdatedRelay.toFlowable(BackpressureStrategy.LATEST));
     }
 
-    Single<List<Purchase>> getPurchases() {
+    public Single<List<Purchase>> getPurchases() {
         return getOwnedItems(BillingClient.SkuType.INAPP);
     }
 
-    Single<List<Purchase>> getSubscriptions() {
+    public Single<List<Purchase>> getSubscriptions() {
         return getOwnedItems(BillingClient.SkuType.SUBS);
     }
 
@@ -165,7 +300,7 @@ public class BillingRepository {
         return connectionFlowable
                 .flatMap(client -> {
                     // If subscriptions are not supported return an empty purchase list, do not send error.
-                    if(type.equals(BillingClient.SkuType.SUBS)) {
+                    if (type.equals(BillingClient.SkuType.SUBS)) {
                         BillingResult billingResult = client.isFeatureSupported(BillingClient.FeatureType.SUBSCRIPTIONS);
                         if (billingResult.getResponseCode() != BillingResponseCode.OK) {
                             Utils.MyLog.g("Subscriptions are not supported, billing response code: " + billingResult.getResponseCode());
@@ -189,7 +324,7 @@ public class BillingRepository {
                 .doOnError(err -> Utils.MyLog.g("BillingRepository::getOwnedItems type: " + type + " error: " + err));
     }
 
-    Single<List<SkuDetails>> getSkuDetails(List<String> ids, String type) {
+    public Single<List<SkuDetails>> getSkuDetails(List<String> ids, String type) {
         SkuDetailsParams params = SkuDetailsParams
                 .newBuilder()
                 .setSkusList(ids)
@@ -215,7 +350,7 @@ public class BillingRepository {
                 .doOnError(err -> Utils.MyLog.g("BillingRepository::getSkuDetails error: " + err));
     }
 
-    Completable launchFlow(Activity activity, String oldSku, String oldPurchaseToken, SkuDetails skuDetails) {
+    public Completable launchFlow(Activity activity, String oldSku, String oldPurchaseToken, SkuDetails skuDetails) {
         BillingFlowParams.Builder billingParamsBuilder = BillingFlowParams
                 .newBuilder();
 
@@ -229,13 +364,17 @@ public class BillingRepository {
                         Flowable.just(client.launchBillingFlow(activity, billingParamsBuilder.build())))
                 .firstOrError()
                 .flatMapCompletable(billingResult -> {
-                    if(billingResult.getResponseCode() == BillingResponseCode.OK) {
+                    if (billingResult.getResponseCode() == BillingResponseCode.OK) {
                         return Completable.complete();
                     } else {
                         return Completable.error(new RuntimeException("Billing response code: " + billingResult.getResponseCode()));
                     }
                 })
                 .doOnError(err -> Utils.MyLog.g("BillingRepository::launchFlow error: " + err));
+    }
+
+    public Completable launchFlow(Activity activity, SkuDetails skuDetails) {
+        return launchFlow(activity, null, null, skuDetails);
     }
 
     Completable acknowledgePurchase(Purchase purchase) {
@@ -313,4 +452,5 @@ public class BillingRepository {
                 .doOnError(err -> Utils.MyLog.g("BillingRepository::consumePurchase error: " + err))
                 .onErrorReturnItem("");
     }
+
 }

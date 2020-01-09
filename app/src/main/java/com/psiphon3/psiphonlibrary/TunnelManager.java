@@ -259,9 +259,7 @@ public class TunnelManager implements PsiphonTunnel.HostService, MyLog.ILogger, 
         MyLog.setLogger(this);
 
         purchaseVerifier = new PurchaseVerifier(getContext(), this);
-        purchaseVerifier.startIab();
 
-        m_compositeDisposable.clear();
         m_compositeDisposable.add(connectionStatusUpdaterDisposable());
     }
 

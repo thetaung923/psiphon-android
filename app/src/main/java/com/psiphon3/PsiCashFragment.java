@@ -55,7 +55,7 @@ import com.jakewharton.rxbinding2.view.RxView;
 import com.jakewharton.rxrelay2.BehaviorRelay;
 import com.jakewharton.rxrelay2.PublishRelay;
 import com.jakewharton.rxrelay2.Relay;
-import com.psiphon3.billing.StatusActivityBillingViewModel;
+import com.psiphon3.billing.GooglePlayBillingHelper;
 import com.psiphon3.billing.SubscriptionState;
 import com.psiphon3.psicash.PsiCashClient;
 import com.psiphon3.psicash.PsiCashException;
@@ -98,7 +98,7 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
     private final CompositeDisposable compositeDisposable = new CompositeDisposable();
     private Disposable viewStatesDisposable;
     private PsiCashViewModel psiCashViewModel;
-    private StatusActivityBillingViewModel billingViewModel;
+    private GooglePlayBillingHelper googlePlayBillingHelper;
 
 
     private Relay<PsiCashIntent> intentsPublishRelay = PublishRelay.<PsiCashIntent>create().toSerialized();
@@ -138,7 +138,7 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
                         throw new IllegalArgumentException("SKU is empty.");
                     }
                     SkuDetails skuDetails = new SkuDetails(skuString);
-                    billingViewModel.launchFlow(getActivity(), skuDetails).subscribe();
+                    googlePlayBillingHelper.launchFlow(getActivity(), skuDetails).subscribe();
                 } catch (JSONException | IllegalArgumentException e) {
                     Utils.MyLog.g("PsiCashFragment::onActivityResult purchase SKU error: " + e);
                 }
@@ -183,18 +183,48 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
                 }
             }
         };
-
-        psiCashViewModel = ViewModelProviders.of(this, new PsiCashViewModelFactory(getActivity().getApplication(), psiCashListener))
-                .get(PsiCashViewModel.class);
-
-        // Pass the UI's intents to the view model
-        psiCashViewModel.processIntents(intents());
     }
 
     @Override
     public void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
+
         RewardedVideoClient.getInstance().initWithActivity(getActivity());
+
+        PsiCashListener psiCashListener = new PsiCashListener() {
+            @Override
+            public void onNewExpiringPurchase(Context context, PsiCashLib.Purchase purchase) {
+                // Store authorization from the purchase
+                Utils.MyLog.g("PsiCash::onNewExpiringPurchase: storing new authorization of accessType " + purchase.authorization.accessType);
+                Authorization authorization = Authorization.fromBase64Encoded(purchase.authorization.encoded);
+                Authorization.storeAuthorization(context, authorization);
+
+                // Send broadcast to restart the tunnel
+                Utils.MyLog.g("PsiCash::onNewExpiringPurchase: send tunnel restart broadcast");
+                android.content.Intent intent = new android.content.Intent(BroadcastIntent.GOT_NEW_EXPIRING_PURCHASE);
+                LocalBroadcastManager.getInstance(getActivity()).sendBroadcast(intent);
+            }
+
+            @Override
+            public void onNewReward(Context context, long reward) {
+                try {
+                    // Store the reward amount
+                    PsiCashClient.getInstance(context).putVideoReward(reward);
+                    // reload local PsiCash to update the view with the new reward amount
+                    intentsPublishRelay.accept(PsiCashIntent.GetPsiCashLocal.create());
+                } catch (PsiCashException e) {
+                    Utils.MyLog.g("PsiCash::onNewReward: failed to store video reward: " + e);
+                }
+            }
+        };
+        psiCashViewModel = ViewModelProviders.of(this, new PsiCashViewModelFactory(getActivity().getApplication(), psiCashListener))
+                .get(PsiCashViewModel.class);
+
+        // Pass the UI's intents to the view model
+        psiCashViewModel.processIntents(intents());
+
+        googlePlayBillingHelper = GooglePlayBillingHelper.getInstance(getActivity().getApplicationContext());
+
         progressOverlay = getActivity().findViewById(R.id.progress_overlay);
         speedBoostBtn = getActivity().findViewById(R.id.purchase_speedboost_btn);
         balanceLabel = getActivity().findViewById(R.id.psicash_balance_label);
@@ -224,14 +254,12 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
                 .subscribe(ValueAnimator::start, err -> {
                     Utils.MyLog.g("Balance label increase animation error: " + err);
                 }));
-
-        billingViewModel = ViewModelProviders.of(getActivity()).get(StatusActivityBillingViewModel.class);
     }
 
 
     public void onPsiCashStoreClick(int uiBalance) {
         compositeDisposable.add(
-                billingViewModel.subscriptionStateFlowable()
+                googlePlayBillingHelper.subscriptionStateFlowable()
                         .firstOrError()
                         .flatMap(subscriptionState -> {
                             if (subscriptionState.hasValidPurchase()) {
@@ -281,8 +309,8 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
         super.onResume();
         bindViewState();
         lifecyclePublishRelay.accept(LifeCycleEvent.ON_RESUME);
-        billingViewModel.queryCurrentSubscriptionStatus();
-        billingViewModel.queryAllSkuDetails();
+        googlePlayBillingHelper.queryCurrentSubscriptionStatus();
+        googlePlayBillingHelper.queryAllSkuDetails();
     }
 
     @Override
@@ -428,7 +456,7 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
     }
 
     private Observable<SubscriptionState> subscriptionStateObservable() {
-        return billingViewModel.subscriptionStateFlowable()
+        return googlePlayBillingHelper.subscriptionStateFlowable()
                 .toObservable()
                 .hide()
                 .distinctUntilChanged();
@@ -506,7 +534,7 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
         if (state.psiCashTransactionInFlight() || state.videoIsLoading()) {
             Utils.animateView(progressOverlay, View.VISIBLE, 0.7f, 200);
         } else {
-            Utils.animateView(progressOverlay, View.INVISIBLE, 0f, 200);
+            Utils.animateView(progressOverlay, View.GONE, 0f, 200);
         }
     }
 

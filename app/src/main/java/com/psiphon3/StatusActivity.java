@@ -20,7 +20,6 @@
 package com.psiphon3;
 
 import android.app.AlertDialog;
-import android.arch.lifecycle.ViewModelProviders;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
@@ -49,10 +48,10 @@ import android.widget.TabHost;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.android.billingclient.api.BillingClient;
 import com.android.billingclient.api.SkuDetails;
 import com.jakewharton.rxrelay2.PublishRelay;
-import com.psiphon3.billing.BillingRepository;
-import com.psiphon3.billing.StatusActivityBillingViewModel;
+import com.psiphon3.billing.GooglePlayBillingHelper;
 import com.psiphon3.billing.SubscriptionState;
 import com.psiphon3.psicash.PsiCashStoreActivity;
 import com.psiphon3.psiphonlibrary.EmbeddedValues;
@@ -68,12 +67,14 @@ import org.json.JSONException;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import io.reactivex.Completable;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.BiFunction;
@@ -100,7 +101,7 @@ public class StatusActivity
     private PublishRelay<Boolean> activeSpeedBoostRelay;
     private Disposable toggleClickDisposable;
 
-    private StatusActivityBillingViewModel billingViewModel;
+    private GooglePlayBillingHelper googlePlayBillingHelper;
     private CompositeDisposable compositeDisposable = new CompositeDisposable();
 
     private View embeddedWebView;
@@ -110,8 +111,8 @@ public class StatusActivity
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        billingViewModel = ViewModelProviders.of(this).get(StatusActivityBillingViewModel.class);
-        billingViewModel.startIab();
+        googlePlayBillingHelper = GooglePlayBillingHelper.getInstance(getApplicationContext());
+        googlePlayBillingHelper.startIab();
 
         setRequestedOrientation (ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         setContentView(R.layout.main);
@@ -145,7 +146,7 @@ public class StatusActivity
 
         // Rate limit observable
         Observable<RateLimitMode> currentRateLimitModeObservable =
-                billingViewModel.subscriptionStateFlowable()
+                googlePlayBillingHelper.subscriptionStateFlowable()
                         .toObservable()
                         .map(subscriptionState -> {
                             switch (subscriptionState.status()) {
@@ -190,7 +191,7 @@ public class StatusActivity
 
         // Components IAB state notifications and PsiCash tab view state Rx subscription.
         compositeDisposable.add(
-                billingViewModel.subscriptionStateFlowable()
+                googlePlayBillingHelper.subscriptionStateFlowable()
                         .doOnNext(subscriptionState -> {
                             MyLog.g("Billing: subscription status: " + subscriptionState.status());
                             if (subscriptionState.error() != null) {
@@ -252,15 +253,15 @@ public class StatusActivity
 
     @Override
     protected void onResume() {
-        billingViewModel.queryCurrentSubscriptionStatus();
-        billingViewModel.queryAllSkuDetails();
+        googlePlayBillingHelper.queryCurrentSubscriptionStatus();
+        googlePlayBillingHelper.queryAllSkuDetails();
         super.onResume();
         if (m_startupPending) {
             m_startupPending = false;
             doStartUp();
         } else {
             compositeDisposable.add(
-                    billingViewModel.subscriptionStateFlowable()
+                    googlePlayBillingHelper.subscriptionStateFlowable()
                             .firstOrError()
                             .doOnSuccess(subscriptionState -> {
                                 // Automatically start if user has a valid purchase or if IAB check failed
@@ -280,9 +281,7 @@ public class StatusActivity
 
     @Override
     public void onDestroy() {
-        billingViewModel.stopIab();
         compositeDisposable.dispose();
-
         psiphonAdManager.onDestroy();
         super.onDestroy();
     }
@@ -709,7 +708,7 @@ public class StatusActivity
     public void onSubscribeButtonClick(View v) {
         Utils.MyLog.g("StatusActivity::onSubscribeButtonClick");
         compositeDisposable.add(
-                billingViewModel.subscriptionStateFlowable()
+                googlePlayBillingHelper.subscriptionStateFlowable()
                         .firstOrError()
                         .subscribe(subscriptionState -> {
                             switch (subscriptionState.status()) {
@@ -726,10 +725,10 @@ public class StatusActivity
                                     String currentSku = subscriptionState.purchase().getSku();
                                     String currentPurchaseToken = subscriptionState.purchase().getPurchaseToken();
                                     compositeDisposable.add(
-                                            billingViewModel.getUnlimitedSubscriptionSkuDetails()
+                                            getUnlimitedSubscriptionSkuDetails()
                                                     .flatMapCompletable(skuDetailsList -> {
                                                         if (skuDetailsList.size() == 1) {
-                                                            return billingViewModel.launchFlow(this, currentSku, currentPurchaseToken, skuDetailsList.get(0));
+                                                            return googlePlayBillingHelper.launchFlow(this, currentSku, currentPurchaseToken, skuDetailsList.get(0));
                                                         }
                                                         // else
                                                         return Completable.error(
@@ -751,14 +750,14 @@ public class StatusActivity
                                     // If user has no subscription launch PaymentChooserActivity
                                     // to show all available subscriptions options.
                                     compositeDisposable.add(
-                                            billingViewModel.allSkuDetailsSingle()
+                                            googlePlayBillingHelper.allSkuDetailsSingle()
                                                     .toObservable()
                                                     .flatMap(Observable::fromIterable)
                                                     .filter(skuDetails -> {
                                                         String sku = skuDetails.getSku();
-                                                        return BillingRepository.IAB_TIMEPASS_SKUS_TO_DAYS.containsKey(sku) ||
-                                                                sku.equals(BillingRepository.IAB_LIMITED_MONTHLY_SUBSCRIPTION_SKU) ||
-                                                                sku.equals(BillingRepository.IAB_UNLIMITED_MONTHLY_SUBSCRIPTION_SKU);
+                                                        return GooglePlayBillingHelper.IAB_TIMEPASS_SKUS_TO_DAYS.containsKey(sku) ||
+                                                                sku.equals(GooglePlayBillingHelper.IAB_LIMITED_MONTHLY_SUBSCRIPTION_SKU) ||
+                                                                sku.equals(GooglePlayBillingHelper.IAB_UNLIMITED_MONTHLY_SUBSCRIPTION_SKU);
                                                     })
                                                     .map(SkuDetails::getOriginalJson)
                                                     .toList()
@@ -791,7 +790,7 @@ public class StatusActivity
                         throw new IllegalArgumentException("SKU is empty.");
                     }
                     SkuDetails skuDetails = new SkuDetails(skuString);
-                    billingViewModel.launchFlow(this, skuDetails).subscribe();
+                    googlePlayBillingHelper.launchFlow(this, skuDetails).subscribe();
                 } catch (JSONException | IllegalArgumentException e) {
                     Utils.MyLog.g("StatusActivity::onActivityResult purchase SKU error: " + e);
                     // Show "Subscription options not available" toast.
@@ -830,5 +829,12 @@ public class StatusActivity
                 .setMessage(messageId)
                 .setPositiveButton(android.R.string.ok, null)
                 .show();
+    }
+
+    public Single<List<SkuDetails>> getUnlimitedSubscriptionSkuDetails() {
+        List<String> ids = Collections.singletonList(
+                GooglePlayBillingHelper.IAB_UNLIMITED_MONTHLY_SUBSCRIPTION_SKU
+        );
+        return googlePlayBillingHelper.getSkuDetails(ids, BillingClient.SkuType.SUBS);
     }
 }
