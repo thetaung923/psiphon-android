@@ -55,7 +55,6 @@ import com.jakewharton.rxbinding2.view.RxView;
 import com.jakewharton.rxrelay2.BehaviorRelay;
 import com.jakewharton.rxrelay2.PublishRelay;
 import com.jakewharton.rxrelay2.Relay;
-import com.psiphon3.billing.BillingRepository;
 import com.psiphon3.billing.StatusActivityBillingViewModel;
 import com.psiphon3.billing.SubscriptionState;
 import com.psiphon3.psicash.PsiCashClient;
@@ -87,8 +86,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import ca.psiphon.psicashlib.PsiCashLib;
-import io.reactivex.Maybe;
 import io.reactivex.Observable;
+import io.reactivex.Single;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.disposables.Disposable;
@@ -234,27 +233,19 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
         compositeDisposable.add(
                 billingViewModel.subscriptionStateFlowable()
                         .firstOrError()
-                        .flatMapMaybe(subscriptionState -> {
+                        .flatMap(subscriptionState -> {
                             if (subscriptionState.hasValidPurchase()) {
-                                return Maybe.empty();
+                                return Single.just(false);
                             }
-                            return billingViewModel.allSkuDetailsSingle()
-                                    .toObservable()
-                                    .flatMap(Observable::fromIterable)
-                                    .filter(skuDetails -> {
-                                        String sku = skuDetails.getSku();
-                                        return BillingRepository.IAB_PSICASH_SKUS_TO_VALUE.containsKey(sku);
-                                    })
-                                    .map(SkuDetails::getOriginalJson)
-                                    .toList()
-                                    .toMaybe();
+                            return Single.just(true);
                         })
-                        .doOnSuccess(jsonSkuDetailsList -> {
-                            Intent intent = new Intent(getActivity(), PsiCashStoreActivity.class);
-                            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                            intent.putExtra(PsiCashStoreActivity.PSICASH_BALANCE_EXTRA, uiBalance);
-                            intent.putStringArrayListExtra(PsiCashStoreActivity.PSICASH_SKU_DETAILS_LIST_EXTRA, new ArrayList<>(jsonSkuDetailsList));
-                            getActivity().startActivityForResult(intent, PSICASH_DETAILS_ACTIVITY_RESULT);
+                        .doOnSuccess(shouldOpenPsiCashStore -> {
+                            if (shouldOpenPsiCashStore) {
+                                Intent intent = new Intent(getActivity(), PsiCashStoreActivity.class);
+                                intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                                intent.putExtra(PsiCashStoreActivity.PSICASH_BALANCE_EXTRA, uiBalance);
+                                getActivity().startActivityForResult(intent, PSICASH_DETAILS_ACTIVITY_RESULT);
+                            }
                         })
                         .subscribe()
         );

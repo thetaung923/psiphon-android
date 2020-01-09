@@ -44,9 +44,9 @@ public class PurchaseSpeedBoostFragment extends Fragment {
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
-        View view = inflater.inflate(R.layout.purchase_speedboost_fragment, container, false);
+        View view = inflater.inflate(R.layout.psicash_store_scene_container_fragment, container, false);
 
-        sceneRoot = (ViewGroup) view.findViewById(R.id.scene_root);
+        sceneRoot = view.findViewById(R.id.scene_root);
 
         Context ctx = container.getContext();
         sceneTunnelNotRunning = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_not_running_scene, ctx);
@@ -54,7 +54,7 @@ public class PurchaseSpeedBoostFragment extends Fragment {
         sceneTunnelConnected = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_connected_scene, ctx);
 
         sceneTunnelNotRunning.setEnterAction(() -> {
-            Button connectBtn = view.findViewById(R.id.connect_psiphon_btn);
+            Button connectBtn = sceneTunnelNotRunning.getSceneRoot().findViewById(R.id.connect_psiphon_btn);
             connectBtn.setOnClickListener(v -> {
                 final Activity activity = getActivity();
                 if (activity == null) {

@@ -13,7 +13,6 @@ import android.widget.TextView;
 import com.psiphon3.psiphonlibrary.LocalizedActivities;
 import com.psiphon3.subscription.R;
 
-import java.util.ArrayList;
 import java.util.Locale;
 
 import io.reactivex.Single;
@@ -21,7 +20,6 @@ import io.reactivex.Single;
 public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity {
 
     public static final String PSICASH_BALANCE_EXTRA = "PSICASH_BALANCE_EXTRA";
-    public static final String PSICASH_SKU_DETAILS_LIST_EXTRA = "PSICASH_SKU_DETAILS_LIST_EXTRA";
     public static final String PURCHASE_SPEEDBOOST = "PURCHASE_SPEEDBOOST";
     static final String PURCHASE_SPEEDBOOST_DISTINGUISHER = "PURCHASE_SPEEDBOOST_DISTINGUISHER";
     static final String PURCHASE_SPEEDBOOST_EXPECTED_PRICE = "PURCHASE_SPEEDBOOST_EXPECTED_PRICE";
@@ -65,32 +63,25 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
             }
         });
 
-        ArrayList<String> jsonSkuDetailsList = getIntent().getStringArrayListExtra(PSICASH_SKU_DETAILS_LIST_EXTRA);
-        pageAdapter = new PageAdapter(getSupportFragmentManager(), tabLayout.getTabCount(), jsonSkuDetailsList);
+        pageAdapter = new PageAdapter(getSupportFragmentManager(), tabLayout.getTabCount());
         viewPager = findViewById(R.id.psicash_store_viewpager);
         viewPager.setAdapter(pageAdapter);
         viewPager.addOnPageChangeListener(new TabLayout.TabLayoutOnPageChangeListener(tabLayout));
     }
 
     static class PageAdapter extends FragmentPagerAdapter {
-        private final ArrayList<String> jsonSkuDetailsList;
         private int numOfTabs;
 
-        PageAdapter(FragmentManager fm, int numOfTabs, ArrayList<String> jsonSkuDetailsList) {
+        PageAdapter(FragmentManager fm, int numOfTabs) {
             super(fm);
             this.numOfTabs = numOfTabs;
-            this.jsonSkuDetailsList = jsonSkuDetailsList;
         }
 
         @Override
         public Fragment getItem(int position) {
             switch (position) {
                 case 0:
-                    PsiCashInAppPurchaseFragment psiCashInAppPurchaseFragment = new PsiCashInAppPurchaseFragment();
-                    Bundle data = new Bundle();
-                    data.putStringArrayList(PSICASH_SKU_DETAILS_LIST_EXTRA, jsonSkuDetailsList);
-                    psiCashInAppPurchaseFragment.setArguments(data);
-                    return psiCashInAppPurchaseFragment;
+                    return new PsiCashInAppPurchaseFragment();
                 case 1:
                     return new PurchaseSpeedBoostFragment();
                 default:
