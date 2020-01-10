@@ -801,6 +801,7 @@ public abstract class MainBase {
                         tunnelServiceInteractor.importConnectionInfo(connectionInfoPayload);
                     })
                     .subscribe();
+            compositeDisposable.add(handleNfcIntentDisposable);
         }
 
         @Override
