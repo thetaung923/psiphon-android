@@ -7,6 +7,7 @@ import android.util.Pair;
 import com.android.billingclient.api.Purchase;
 import com.jakewharton.rxrelay2.BehaviorRelay;
 import com.jakewharton.rxrelay2.PublishRelay;
+import com.psiphon3.TunnelState;
 import com.psiphon3.psiphonlibrary.Authorization;
 import com.psiphon3.psiphonlibrary.EmbeddedValues;
 import com.psiphon3.psiphonlibrary.Utils;
@@ -34,7 +35,7 @@ public class PurchaseVerifier {
     private final PurchaseAuthorizationListener purchaseAuthorizationListener;
     private GooglePlayBillingHelper repository;
 
-    private PublishRelay<Pair<Boolean, Integer>> tunnelConnectionStatePublishRelay = PublishRelay.create();
+    private PublishRelay<TunnelState> tunnelConnectionStatePublishRelay = PublishRelay.create();
     private BehaviorRelay<SubscriptionState> subscriptionStateBehaviorRelay = BehaviorRelay.create();
     private CompositeDisposable compositeDisposable = new CompositeDisposable();
 
@@ -48,7 +49,7 @@ public class PurchaseVerifier {
         queryCurrentSubscriptionStatus();
     }
 
-    private Flowable<Pair<Boolean, Integer>> tunnelConnectionStateFlowable() {
+    private Flowable<TunnelState> tunnelConnectionStateFlowable() {
         return tunnelConnectionStatePublishRelay
                 .distinctUntilChanged()
                 .toFlowable(BackpressureStrategy.LATEST);
@@ -56,25 +57,28 @@ public class PurchaseVerifier {
 
     private Disposable purchaseVerificationDisposable() {
         return tunnelConnectionStateFlowable()
-                .switchMap(pair -> {
-                    boolean isConnected = pair.first;
-                    final int httpProxyPort = pair.second;
-                    if (!isConnected) {
+                .switchMap(tunnelState -> {
+                    if (!(tunnelState.isRunning() && tunnelState.connectionData().isConnected())) {
                         // Not connected, do nothing
                         return Flowable.empty();
                     }
                     // Once connected run IAB check and pass the subscription state and
-                    // current http proxy port downstream.
+                    // current tunnel state connection data downstream.
                     return repository.subscriptionStateFlowable()
-                            .map(subscriptionState -> new Pair<>(subscriptionState, httpProxyPort));
+                            .map(subscriptionState -> new Pair<>(subscriptionState, tunnelState.connectionData()));
                 })
                 .switchMap(pair -> {
                     SubscriptionState subscriptionState = pair.first;
-                    final int httpProxyPort = pair.second;
+                    TunnelState.ConnectionData connectionData = pair.second;
+                    final int httpProxyPort = connectionData.httpPort();
                     if (!subscriptionState.hasValidPurchase()) {
-                        Utils.MyLog.g("PurchaseVerifier: user has no subscription, continue.");
-                        // No subscription, do nothing
-                        return Flowable.empty();
+                        if (BuildConfig.SUBSCRIPTION_SPONSOR_ID.equals(connectionData.sponsorId())) {
+                            Utils.MyLog.g("PurchaseVerifier: user has no subscription, will restart as non subscriber.");
+                            return Flowable.just(UpdateConnectionAction.RESTART_AS_NON_SUBSCRIBER);
+                        } else {
+                            Utils.MyLog.g("PurchaseVerifier: user has no subscription, continue.");
+                            return Flowable.empty();
+                        }
                     }
                     // Otherwise check if we have already have an authorization for this token
                     String persistedPurchaseToken = appPreferences.getString(PREFERENCE_PURCHASE_TOKEN, "");
@@ -173,8 +177,8 @@ public class PurchaseVerifier {
                 );
     }
 
-    public void onTunnelConnected(Pair<Boolean, Integer> pair) {
-        tunnelConnectionStatePublishRelay.accept(pair);
+    public void onTunnelState(TunnelState tunnelState) {
+        tunnelConnectionStatePublishRelay.accept(tunnelState);
     }
 
     public void onActiveAuthorizationIDs(List<String> acceptedAuthorizationIds) {
