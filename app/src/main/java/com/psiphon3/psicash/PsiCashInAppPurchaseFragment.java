@@ -41,7 +41,7 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
-        Context ctx = container.getContext();
+        Context ctx = getContext();
         googlePlayBillingHelper = GooglePlayBillingHelper.getInstance(ctx);
 
         View view = inflater.inflate(R.layout.psicash_store_scene_container_fragment, container, false);
@@ -89,18 +89,17 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
     public void onResume() {
         super.onResume();
         googlePlayBillingHelper.queryAllSkuDetails();
-        if (queryPurchasesDisposable != null && !queryPurchasesDisposable.isDisposed()) {
-            return;
+        if (queryPurchasesDisposable == null || queryPurchasesDisposable.isDisposed()) {
+            queryPurchasesDisposable = googlePlayBillingHelper.getPurchases()
+                    .onErrorReturnItem(Collections.emptyList())
+                    .subscribe(purchasePublishRelay);
         }
-        queryPurchasesDisposable = googlePlayBillingHelper.getPurchases()
-                .onErrorReturnItem(Collections.emptyList())
-                .subscribe(purchasePublishRelay);
     }
 
     @Override
     public void onPause() {
         super.onPause();
-        if (queryPurchasesDisposable != null && !queryPurchasesDisposable.isDisposed()) {
+        if (queryPurchasesDisposable != null) {
             queryPurchasesDisposable.dispose();
         }
     }
@@ -127,10 +126,6 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
                     btn.setText(R.string.psicash_purchase_free_button_price);
                     btn.setOnClickListener(v -> {
                         final Activity activity = getActivity();
-                        if (activity == null) {
-                            return;
-                        }
-
                         try {
                             Intent data = new Intent();
                             data.putExtra(PsiCashStoreActivity.PURCHASE_PSICASH_GET_FREE, true);
@@ -143,11 +138,13 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
                     containerLayout.addView(psicashPurchaseItemView);
 
                     Collections.sort(skuDetailsList, (skuDetails, t1) -> {
-                        if (skuDetails.getPriceAmountMicros() >= t1.getPriceAmountMicros())
+                        if (skuDetails.getPriceAmountMicros() > t1.getPriceAmountMicros()) {
                             return 1;
-                        else if (skuDetails.getPriceAmountMicros() <= t1.getPriceAmountMicros())
+                        } else if (skuDetails.getPriceAmountMicros() < t1.getPriceAmountMicros()) {
                             return -1;
-                        else return 0;
+                        } else {
+                            return 0;
+                        }
                     });
 
                     for (SkuDetails skuDetails : skuDetailsList) {
@@ -167,10 +164,6 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
                         btn.setText(skuDetails.getPrice());
                         btn.setOnClickListener(v -> {
                             final Activity activity = getActivity();
-                            if (activity == null) {
-                                return;
-                            }
-
                             try {
                                 Intent intentData = new Intent();
                                 intentData.putExtra(PsiCashStoreActivity.PURCHASE_PSICASH, true);

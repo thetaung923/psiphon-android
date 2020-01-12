@@ -1,5 +1,6 @@
 package com.psiphon3.psicash;
 
+import android.arch.lifecycle.ViewModelProviders;
 import android.content.Context;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
@@ -28,19 +29,18 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
     public static final String PURCHASE_PSICASH_SKU_DETAILS_JSON = "PURCHASE_PSICASH_SKU_DETAILS_JSON";
     public static final String SPEEDBOOST_CONNECT_PSIPHON_EXTRA = "SPEEDBOOST_CONNECT_PSIPHON_EXTRA";
 
+    private PsiCashStoreViewModel viewModel;
 
-    TabLayout tabLayout;
-    ViewPager viewPager;
-    PageAdapter pageAdapter;
-
-    static Single<PsiCashClient> getPsiCashClientSingle(final Context context) {
-        return Single.fromCallable(() -> PsiCashClient.getInstance(context));
-    }
+    private TabLayout tabLayout;
+    private ViewPager viewPager;
+    private PageAdapter pageAdapter;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.psicash_store_activity);
+
+        viewModel = ViewModelProviders.of(this).get(PsiCashStoreViewModel.class);
 
         TextView balanceLabel = findViewById(R.id.psicash_balance_label);
         int uiBalance = getIntent().getIntExtra(PSICASH_BALANCE_EXTRA, 0);
@@ -67,6 +67,18 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
         viewPager = findViewById(R.id.psicash_store_viewpager);
         viewPager.setAdapter(pageAdapter);
         viewPager.addOnPageChangeListener(new TabLayout.TabLayoutOnPageChangeListener(tabLayout));
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        viewModel.getTunnelServiceInteractor().resume(getApplicationContext());
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        viewModel.getTunnelServiceInteractor().pause(getApplicationContext());
     }
 
     static class PageAdapter extends FragmentPagerAdapter {

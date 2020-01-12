@@ -1,6 +1,7 @@
 package com.psiphon3.psicash;
 
 import android.app.Activity;
+import android.arch.lifecycle.ViewModelProviders;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
@@ -33,10 +34,9 @@ import io.reactivex.schedulers.Schedulers;
 public class PurchaseSpeedBoostFragment extends Fragment {
 
     private CompositeDisposable compositeDisposable = new CompositeDisposable();
-    private TunnelServiceInteractor tunnelServiceInteractor;
+    private PsiCashStoreViewModel viewModel;
 
     private Scene sceneTunnelNotRunning;
-    private Scene sceneTunnelNotConnected;
     private Scene sceneTunnelConnected;
 
     private ViewGroup sceneRoot;
@@ -44,22 +44,20 @@ public class PurchaseSpeedBoostFragment extends Fragment {
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
+        viewModel = ViewModelProviders.of(getActivity()).get(PsiCashStoreViewModel.class);
+
         View view = inflater.inflate(R.layout.psicash_store_scene_container_fragment, container, false);
 
         sceneRoot = view.findViewById(R.id.scene_root);
 
-        Context ctx = container.getContext();
+        Context ctx = getContext();
         sceneTunnelNotRunning = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_not_running_scene, ctx);
-        sceneTunnelNotConnected = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_not_connected_scene, ctx);
         sceneTunnelConnected = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_connected_scene, ctx);
 
         sceneTunnelNotRunning.setEnterAction(() -> {
             Button connectBtn = sceneTunnelNotRunning.getSceneRoot().findViewById(R.id.connect_psiphon_btn);
             connectBtn.setOnClickListener(v -> {
                 final Activity activity = getActivity();
-                if (activity == null) {
-                    return;
-                }
                 try {
                     Intent data = new Intent();
                     data.putExtra(PsiCashStoreActivity.SPEEDBOOST_CONNECT_PSIPHON_EXTRA, true);
@@ -73,7 +71,7 @@ public class PurchaseSpeedBoostFragment extends Fragment {
 
         sceneTunnelConnected.setEnterAction(() -> {
             compositeDisposable.add(
-                    PsiCashStoreActivity.getPsiCashClientSingle(ctx)
+                    viewModel.getPsiCashClientSingle(ctx)
                             .flatMapObservable(PsiCashClient::getPsiCashLocal)
                             .subscribeOn(Schedulers.computation())
                             .observeOn(AndroidSchedulers.mainThread())
@@ -83,34 +81,19 @@ public class PurchaseSpeedBoostFragment extends Fragment {
                             ));
         });
 
-        tunnelServiceInteractor = new TunnelServiceInteractor(ctx);
-        tunnelServiceInteractor.tunnelStateFlowable()
+        viewModel.getTunnelServiceInteractor().tunnelStateFlowable()
                 .filter(state -> !state.isUnknown())
                 .distinctUntilChanged()
                 .doOnNext(state -> {
-                    if (!state.isRunning()) {
+                    if (state.isStopped()) {
                         TransitionManager.go(sceneTunnelNotRunning);
-                    } else if (!state.connectionData().isConnected()) {
-                        TransitionManager.go(sceneTunnelNotConnected);
-                    } else if (state.connectionData().isConnected()) {
+                    } else if (state.isRunning() && state.connectionData().isConnected()) {
                         TransitionManager.go(sceneTunnelConnected);
                     }
                 })
                 .subscribe();
 
         return view;
-    }
-
-    @Override
-    public void onResume() {
-        super.onResume();
-        tunnelServiceInteractor.resume(getActivity().getApplicationContext());
-    }
-
-    @Override
-    public void onPause() {
-        super.onPause();
-        tunnelServiceInteractor.pause(getActivity().getApplicationContext());
     }
 
     private void populateSpeedboostPurchasesScreen(View view, PsiCashModel.PsiCash psiCash) {
