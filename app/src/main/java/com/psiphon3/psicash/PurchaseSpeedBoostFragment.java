@@ -20,11 +20,11 @@ import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
 
-import com.psiphon3.psiphonlibrary.TunnelServiceInteractor;
 import com.psiphon3.psiphonlibrary.Utils;
 import com.psiphon3.subscription.R;
 
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import ca.psiphon.psicashlib.PsiCashLib;
 import io.reactivex.android.schedulers.AndroidSchedulers;
@@ -32,14 +32,11 @@ import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.schedulers.Schedulers;
 
 public class PurchaseSpeedBoostFragment extends Fragment {
-
     private CompositeDisposable compositeDisposable = new CompositeDisposable();
     private PsiCashStoreViewModel viewModel;
 
     private Scene sceneTunnelNotRunning;
     private Scene sceneTunnelConnected;
-
-    private ViewGroup sceneRoot;
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
@@ -48,13 +45,15 @@ public class PurchaseSpeedBoostFragment extends Fragment {
 
         View view = inflater.inflate(R.layout.psicash_store_scene_container_fragment, container, false);
 
-        sceneRoot = view.findViewById(R.id.scene_root);
+        ViewGroup sceneRoot = view.findViewById(R.id.scene_root);
+        View progressOverlay = view.findViewById(R.id.progress_overlay);
 
         Context ctx = getContext();
         sceneTunnelNotRunning = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_not_running_scene, ctx);
         sceneTunnelConnected = Scene.getSceneForLayout(sceneRoot, R.layout.purchase_speedboost_connected_scene, ctx);
 
         sceneTunnelNotRunning.setEnterAction(() -> {
+            progressOverlay.setVisibility(View.GONE);
             Button connectBtn = sceneTunnelNotRunning.getSceneRoot().findViewById(R.id.connect_psiphon_btn);
             connectBtn.setOnClickListener(v -> {
                 final Activity activity = getActivity();
@@ -68,15 +67,21 @@ public class PurchaseSpeedBoostFragment extends Fragment {
             });
         });
 
-
         sceneTunnelConnected.setEnterAction(() -> {
+            AtomicBoolean progressShowing = new AtomicBoolean(progressOverlay.getVisibility() == View.VISIBLE);
             compositeDisposable.add(
                     viewModel.getPsiCashClientSingle(ctx)
                             .flatMapObservable(PsiCashClient::getPsiCashLocal)
+                            .firstOrError()
                             .subscribeOn(Schedulers.computation())
                             .observeOn(AndroidSchedulers.mainThread())
                             .subscribe(
-                                    psiCash -> populateSpeedboostPurchasesScreen(view, psiCash),
+                                    psiCash -> {
+                                        if (progressShowing.compareAndSet(true, false)) {
+                                            progressOverlay.setVisibility(View.GONE);
+                                        }
+                                        populateSpeedBoostPurchases(view, psiCash);
+                                    },
                                     err -> Utils.MyLog.g("PurchaseSpeedBoostFragment: error getting local PsiCash state:" + err)
                             ));
         });
@@ -96,7 +101,7 @@ public class PurchaseSpeedBoostFragment extends Fragment {
         return view;
     }
 
-    private void populateSpeedboostPurchasesScreen(View view, PsiCashModel.PsiCash psiCash) {
+    private void populateSpeedBoostPurchases(View view, PsiCashModel.PsiCash psiCash) {
         final Activity activity = getActivity();
         if (activity == null || psiCash == null) {
             return;
@@ -175,9 +180,8 @@ public class PurchaseSpeedBoostFragment extends Fragment {
                                     data.putExtra(PsiCashStoreActivity.PURCHASE_SPEEDBOOST_DISTINGUISHER, price.distinguisher);
                                     data.putExtra(PsiCashStoreActivity.PURCHASE_SPEEDBOOST_EXPECTED_PRICE, price.price);
                                     activity.setResult(Activity.RESULT_OK, data);
-
                                     activity.finish();
-                                } catch (NullPointerException e) {
+                                } catch (NullPointerException ignored) {
                                 }
                             })
                             .setCancelable(true)

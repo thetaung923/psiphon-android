@@ -271,7 +271,6 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
                             if (shouldOpenPsiCashStore) {
                                 Intent intent = new Intent(getActivity(), PsiCashStoreActivity.class);
                                 intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                                intent.putExtra(PsiCashStoreActivity.PSICASH_BALANCE_EXTRA, uiBalance);
                                 getActivity().startActivityForResult(intent, PSICASH_DETAILS_ACTIVITY_RESULT);
                             }
                         })
@@ -532,9 +531,9 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
 
     private void updateUiProgressView(PsiCashViewState state) {
         if (state.psiCashTransactionInFlight() || state.videoIsLoading()) {
-            Utils.animateView(progressOverlay, View.VISIBLE, 0.7f, 200);
+            progressOverlay.setVisibility(View.VISIBLE);
         } else {
-            Utils.animateView(progressOverlay, View.GONE, 0f, 200);
+            progressOverlay.setVisibility(View.GONE);
         }
     }
 

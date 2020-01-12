@@ -35,7 +35,6 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
     private Scene sceneBuyPsiCash;
     private Scene sceneUnfinishedPsiCashPurchase;
 
-    private ViewGroup sceneRoot;
     private Disposable queryPurchasesDisposable;
 
     @Override
@@ -46,18 +45,15 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
 
         View view = inflater.inflate(R.layout.psicash_store_scene_container_fragment, container, false);
 
-        sceneRoot = view.findViewById(R.id.scene_root);
+        ViewGroup sceneRoot = view.findViewById(R.id.scene_root);
+        View progressOverlay = view.findViewById(R.id.progress_overlay);
 
         sceneBuyPsiCash = Scene.getSceneForLayout(sceneRoot, R.layout.buy_psicash_scene, ctx);
         sceneUnfinishedPsiCashPurchase = Scene.getSceneForLayout(sceneRoot, R.layout.buy_psicash_unfinished_purchase_scene, ctx);
 
-        View progressOverlay = view.findViewById(R.id.progress_overlay);
-        Utils.animateView(progressOverlay, View.VISIBLE, 0.7f, 200);
-
         purchasePublishRelay
                 .distinctUntilChanged()
                 .doOnNext(purchases -> {
-                    Utils.animateView(progressOverlay, View.GONE, 0f, 200);
                     Purchase unfinishedPurchase = null;
                     for (Purchase purchase : purchases) {
                         if (GooglePlayBillingHelper.IAB_PSICASH_SKUS_TO_VALUE.containsKey(purchase.getSku())) {
@@ -66,10 +62,12 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
                         }
                     }
                     if (unfinishedPurchase == null) {
-                        sceneBuyPsiCash.setEnterAction(buyPsiCashEnterAction(inflater, container, view));
+                        sceneBuyPsiCash.setEnterAction(
+                                buyPsiCashEnterAction(progressOverlay, inflater, container, view));
                         TransitionManager.go(sceneBuyPsiCash);
                     } else {
-                        sceneUnfinishedPsiCashPurchase.setEnterAction(unfinishedPurchaseEnterAction(view, unfinishedPurchase));
+                        sceneUnfinishedPsiCashPurchase.setEnterAction(
+                                unfinishedPurchaseEnterAction(progressOverlay, view, unfinishedPurchase));
                         TransitionManager.go(sceneUnfinishedPsiCashPurchase);
                     }
                 })
@@ -78,8 +76,9 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
         return view;
     }
 
-    private Runnable unfinishedPurchaseEnterAction(View view, Purchase unfinishedPurchase) {
+    private Runnable unfinishedPurchaseEnterAction(View progressOverlay, View view, Purchase unfinishedPurchase) {
         return () -> {
+            progressOverlay.setVisibility(View.GONE);
             TextView tv = view.findViewById(R.id.unfinishedPurchaseTitle);
             tv.setText(unfinishedPurchase.getOrderId());
         };
@@ -104,7 +103,7 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
         }
     }
 
-    private Runnable buyPsiCashEnterAction(LayoutInflater inflater, ViewGroup container, View view) {
+    private Runnable buyPsiCashEnterAction(View progressOverlay, LayoutInflater inflater, ViewGroup container, View view) {
         return () -> googlePlayBillingHelper.allSkuDetailsSingle()
                 .toObservable()
                 .flatMap(Observable::fromIterable)
@@ -114,6 +113,8 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
                 })
                 .toList()
                 .doOnSuccess(skuDetailsList -> {
+                    progressOverlay.setVisibility(View.GONE);
+
                     LinearLayout containerLayout = view.findViewById(R.id.psicash_purchase_options_container);
 
                     // Add "Watch ad to earn 35 PsiCash" button
@@ -170,7 +171,7 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
                                 intentData.putExtra(PsiCashStoreActivity.PURCHASE_PSICASH_SKU_DETAILS_JSON, skuDetails.getOriginalJson());
                                 activity.setResult(Activity.RESULT_OK, intentData);
                                 activity.finish();
-                            } catch (NullPointerException e) {
+                            } catch (NullPointerException ignored) {
                             }
                         });
 
