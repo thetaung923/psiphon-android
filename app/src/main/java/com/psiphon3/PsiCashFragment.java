@@ -308,7 +308,7 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
         super.onResume();
         bindViewState();
         lifecyclePublishRelay.accept(LifeCycleEvent.ON_RESUME);
-        googlePlayBillingHelper.queryCurrentSubscriptionStatus();
+        googlePlayBillingHelper.queryAllPurchases();
         googlePlayBillingHelper.queryAllSkuDetails();
     }
 

@@ -86,7 +86,7 @@ import io.reactivex.schedulers.Schedulers;
 import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static com.psiphon3.StatusActivity.ACTION_SHOW_GET_HELP_DIALOG;
 
-public class TunnelManager implements PsiphonTunnel.HostService, MyLog.ILogger, PurchaseVerifier.PurchaseAuthorizationListener {
+public class TunnelManager implements PsiphonTunnel.HostService, MyLog.ILogger, PurchaseVerifier.VerificationResultListener {
     // Android IPC messages
     // Client -> Service
     enum ClientToServiceMessage {
@@ -659,7 +659,7 @@ public class TunnelManager implements PsiphonTunnel.HostService, MyLog.ILogger, 
                         }
                         manager.mClients.add(client);
                         manager.m_newClientPublishRelay.accept(new Object());
-                        manager.purchaseVerifier.queryCurrentSubscriptionStatus();
+                        manager.purchaseVerifier.queryAllPurchases();
 
                         // When new client binds also sync locale
                         setLocale(manager);
@@ -1534,9 +1534,9 @@ public class TunnelManager implements PsiphonTunnel.HostService, MyLog.ILogger, 
         m_waitingForConnectivity.set(false);
     }
 
-    // PurchaseVerifier.PurchaseAuthorizationListener implementation
+    // PurchaseVerifier.VerificationResultListener implementation
     @Override
-    public void updateConnection(PurchaseVerifier.UpdateConnectionAction action) {
+    public void onVerificationResult(PurchaseVerifier.VerificationResult action) {
         switch (action) {
             case RESTART_AS_NON_SUBSCRIBER:
                 MyLog.g("TunnelManager: purchase verification: will restart as a non subscriber");
@@ -1548,6 +1548,10 @@ public class TunnelManager implements PsiphonTunnel.HostService, MyLog.ILogger, 
                 m_tunnelConfig.sponsorId = BuildConfig.SUBSCRIPTION_SPONSOR_ID;
                 restartTunnel();
                 break;
+            case REFRESH_PSICASH_STATE:
+                // TODO: instruct client to sync PsiCash state with the server and update UI.
+                break;
+
         }
     }
 

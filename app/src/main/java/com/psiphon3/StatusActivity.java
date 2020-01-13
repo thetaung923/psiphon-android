@@ -278,7 +278,7 @@ public class StatusActivity
 
     @Override
     protected void onResume() {
-        googlePlayBillingHelper.queryCurrentSubscriptionStatus();
+        googlePlayBillingHelper.queryAllPurchases();
         googlePlayBillingHelper.queryAllSkuDetails();
         super.onResume();
 

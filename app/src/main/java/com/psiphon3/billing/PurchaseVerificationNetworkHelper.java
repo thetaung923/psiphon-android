@@ -21,6 +21,7 @@ package com.psiphon3.billing;
 
 import android.content.Context;
 
+import com.android.billingclient.api.Purchase;
 import com.psiphon3.psiphonlibrary.Utils.MyLog;
 
 import org.json.JSONObject;
@@ -41,42 +42,22 @@ import okhttp3.RequestBody;
 
 public class PurchaseVerificationNetworkHelper {
 
-    static final int TIMEOUT_SECONDS = 30;
-    static final String SUBSCRIPTION_CHECK_URL = "https://subscription.psiphon3.com/playstore";
-    static final MediaType JSON = MediaType.parse("application/json");
-    static final int TRIES_COUNT = 5;
+    private static final int TIMEOUT_SECONDS = 30;
+    private static final String SUBSCRIPTION_VERIFICATION_URL = "https://subscription.psiphon3.com/playstore";
+    private static final String PSICASH_VERIFICATION_URL = "https://subscription.psiphon3.com/playstore/psicash";
+    private static final MediaType JSON = MediaType.parse("application/json");
+    private static final int TRIES_COUNT = 5;
 
-    OkHttpClient.Builder okHttpClientBuilder;
-    Context ctx;
-    boolean isSubscription;
-    String productId;
-    String purchaseToken;
+    private OkHttpClient.Builder okHttpClientBuilder;
+    private Context ctx;
     private int httpProxyPort = 0;
 
     public static class Builder {
         private Context ctx;
-        private boolean isSubscription;
-        private String productId;
-        private String purchaseToken;
         private int httpProxyPort = 0;
 
         public Builder(Context ctx) {
             this.ctx = ctx;
-        }
-
-        public Builder withIsSubscription(boolean isSubscription) {
-            this.isSubscription = isSubscription;
-            return this;
-        }
-
-        public Builder withProductId(String productId) {
-            this.productId = productId;
-            return this;
-        }
-
-        public Builder withPurchaseToken(String purchaseToken) {
-            this.purchaseToken = purchaseToken;
-            return this;
         }
 
         public Builder withHttpProxyPort(int httpProxyPort) {
@@ -86,9 +67,6 @@ public class PurchaseVerificationNetworkHelper {
 
         public PurchaseVerificationNetworkHelper build() {
             PurchaseVerificationNetworkHelper helper = new PurchaseVerificationNetworkHelper(this.ctx);
-            helper.isSubscription = this.isSubscription;
-            helper.productId = this.productId;
-            helper.purchaseToken = this.purchaseToken;
             helper.httpProxyPort = this.httpProxyPort;
 
             helper.okHttpClientBuilder = new OkHttpClient.Builder()
@@ -104,19 +82,27 @@ public class PurchaseVerificationNetworkHelper {
         this.ctx = ctx;
     }
 
-    public Flowable<String> fetchAuthorizationFlowable() {
+    public Flowable<String> verifyFlowable(Purchase purchase) {
         return Observable.fromCallable(
                 () -> {
                     JSONObject json = new JSONObject();
+
+                    final boolean isSubscription =
+                            GooglePlayBillingHelper.isLimitedSubscription(purchase) ||
+                                    GooglePlayBillingHelper.isUnlimitedSubscription(purchase);
+
+                    final String url = GooglePlayBillingHelper.isPsiCashPurchase(purchase) ?
+                            PSICASH_VERIFICATION_URL : SUBSCRIPTION_VERIFICATION_URL;
+
                     json.put("is_subscription", isSubscription);
                     json.put("package_name", ctx.getPackageName());
-                    json.put("product_id", productId);
-                    json.put("token", purchaseToken);
+                    json.put("product_id", purchase.getSku());
+                    json.put("token", purchase.getPurchaseToken());
 
                     RequestBody requestBody = RequestBody.create(JSON, json.toString());
 
                     Request request = new Request.Builder()
-                            .url(SUBSCRIPTION_CHECK_URL)
+                            .url(url)
                             .post(requestBody)
                             .build();
 

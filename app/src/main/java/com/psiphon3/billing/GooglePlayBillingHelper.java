@@ -57,11 +57,11 @@ import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.disposables.Disposable;
 
 public class GooglePlayBillingHelper {
-    static public final String IAB_PUBLIC_KEY = BuildConfig.IAB_PUBLIC_KEY;
+    private static final String IAB_PUBLIC_KEY = BuildConfig.IAB_PUBLIC_KEY;
     static public final String IAB_LIMITED_MONTHLY_SUBSCRIPTION_SKU = "speed_limited_ad_free_subscription";
     static public final String IAB_UNLIMITED_MONTHLY_SUBSCRIPTION_SKU = "basic_ad_free_subscription_5";
 
-    static final String[] IAB_ALL_UNLIMITED_MONTHLY_SUBSCRIPTION_SKUS = {
+    private static final String[] IAB_ALL_UNLIMITED_MONTHLY_SUBSCRIPTION_SKUS = {
             IAB_UNLIMITED_MONTHLY_SUBSCRIPTION_SKU,
             "basic_ad_free_subscription",
             "basic_ad_free_subscription_2",
@@ -99,12 +99,14 @@ public class GooglePlayBillingHelper {
     private BehaviorRelay<SubscriptionState> subscriptionStateBehaviorRelay;
     private BehaviorRelay<List<SkuDetails>> allSkuDetailsBehaviorRelay;
     private Disposable startIabDisposable;
+    private BehaviorRelay<Purchase> psiCashPurchaseBehaviorRelay;
 
 
     private GooglePlayBillingHelper(final Context ctx) {
         purchasesUpdatedRelay = PublishRelay.create();
         compositeDisposable = new CompositeDisposable();
         subscriptionStateBehaviorRelay = BehaviorRelay.create();
+        psiCashPurchaseBehaviorRelay = BehaviorRelay.create();
         allSkuDetailsBehaviorRelay = BehaviorRelay.create();
 
         PurchasesUpdatedListener listener = (billingResult, purchases) -> {
@@ -168,6 +170,11 @@ public class GooglePlayBillingHelper {
                 .toFlowable(BackpressureStrategy.LATEST);
     }
 
+    public Flowable<Purchase> psiCashPurchaseFlowable() {
+        return psiCashPurchaseBehaviorRelay
+                .toFlowable(BackpressureStrategy.LATEST);
+    }
+
     public Single<List<SkuDetails>> allSkuDetailsSingle() {
         return allSkuDetailsBehaviorRelay
                 .firstOrError();
@@ -184,7 +191,7 @@ public class GooglePlayBillingHelper {
                             if (purchasesUpdate.responseCode() == BillingClient.BillingResponseCode.OK) {
                                 processPurchases(purchasesUpdate.purchases());
                             } else if (purchasesUpdate.responseCode() == BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED) {
-                                queryCurrentSubscriptionStatus();
+                                queryAllPurchases();
                             } else {
                                 Utils.MyLog.g("BillingRepository::observeUpdates purchase update error response code: " + purchasesUpdate.responseCode());
                             }
@@ -198,15 +205,15 @@ public class GooglePlayBillingHelper {
     }
 
     private Single<List<SkuDetails>> getConsumablesSkuDetails() {
-        List<String> ids = new ArrayList<>(GooglePlayBillingHelper.IAB_TIMEPASS_SKUS_TO_DAYS.keySet());
-        ids.addAll(new ArrayList<>(GooglePlayBillingHelper.IAB_PSICASH_SKUS_TO_VALUE.keySet()));
+        List<String> ids = new ArrayList<>(IAB_TIMEPASS_SKUS_TO_DAYS.keySet());
+        ids.addAll(new ArrayList<>(IAB_PSICASH_SKUS_TO_VALUE.keySet()));
         return getSkuDetails(ids, BillingClient.SkuType.INAPP);
     }
 
     private Single<List<SkuDetails>> getSubscriptionsSkuDetails() {
         List<String> ids = Arrays.asList(
-                GooglePlayBillingHelper.IAB_LIMITED_MONTHLY_SUBSCRIPTION_SKU,
-                GooglePlayBillingHelper.IAB_UNLIMITED_MONTHLY_SUBSCRIPTION_SKU
+                IAB_LIMITED_MONTHLY_SUBSCRIPTION_SKU,
+                IAB_UNLIMITED_MONTHLY_SUBSCRIPTION_SKU
         );
         return getSkuDetails(ids, BillingClient.SkuType.SUBS);
     }
@@ -221,7 +228,7 @@ public class GooglePlayBillingHelper {
         );
     }
 
-    public void queryCurrentSubscriptionStatus() {
+    public void queryAllPurchases() {
         compositeDisposable.add(
                 Single.mergeDelayError(getSubscriptions(), getPurchases())
                         .toList()
@@ -252,7 +259,7 @@ public class GooglePlayBillingHelper {
             }
 
             // Skip purchases that don't pass signature verification.
-            if (!Security.verifyPurchase(GooglePlayBillingHelper.IAB_PUBLIC_KEY,
+            if (!Security.verifyPurchase(IAB_PUBLIC_KEY,
                     purchase.getOriginalJson(), purchase.getSignature())) {
                 Utils.MyLog.g("StatusActivityBillingViewModel::processPurchases: failed verification for purchase: " + purchase);
                 continue;
@@ -264,18 +271,22 @@ public class GooglePlayBillingHelper {
             // [BillingClient.acknowledgePurchaseAsync] inside your app.
             compositeDisposable.add(acknowledgePurchase(purchase).subscribe());
 
-            if (GooglePlayBillingHelper.hasUnlimitedSubscription(purchase)) {
+            if (isPsiCashPurchase(purchase)) {
+                psiCashPurchaseBehaviorRelay.accept(purchase);
+                return;
+            } else if (isUnlimitedSubscription(purchase)) {
                 subscriptionStateBehaviorRelay.accept(SubscriptionState.unlimitedSubscription(purchase));
                 return;
-            } else if (GooglePlayBillingHelper.hasLimitedSubscription(purchase)) {
+            } else if (isLimitedSubscription(purchase)) {
                 subscriptionStateBehaviorRelay.accept(SubscriptionState.limitedSubscription(purchase));
                 return;
-            } else if (GooglePlayBillingHelper.hasTimePass(purchase)) {
+            } else if (isValidTimePass(purchase)) {
                 subscriptionStateBehaviorRelay.accept(SubscriptionState.timePass(purchase));
                 return;
             }
+
             // Check if this purchase is an expired timepass which needs to be consumed
-            if (GooglePlayBillingHelper.IAB_TIMEPASS_SKUS_TO_DAYS.containsKey(purchase.getSku())) {
+            if (IAB_TIMEPASS_SKUS_TO_DAYS.containsKey(purchase.getSku())) {
                 compositeDisposable.add(consumePurchase(purchase).subscribe());
             }
         }
@@ -404,15 +415,15 @@ public class GooglePlayBillingHelper {
                 .onErrorComplete();
     }
 
-    static boolean hasUnlimitedSubscription(@NonNull Purchase purchase) {
+    static boolean isUnlimitedSubscription(@NonNull Purchase purchase) {
         return Arrays.asList(IAB_ALL_UNLIMITED_MONTHLY_SUBSCRIPTION_SKUS).contains(purchase.getSku());
     }
 
-    static boolean hasLimitedSubscription(@NonNull Purchase purchase) {
+    static boolean isLimitedSubscription(@NonNull Purchase purchase) {
         return purchase.getSku().equals(IAB_LIMITED_MONTHLY_SUBSCRIPTION_SKU);
     }
 
-    static boolean hasTimePass(@NonNull Purchase purchase) {
+    static boolean isValidTimePass(@NonNull Purchase purchase) {
         String purchaseSku = purchase.getSku();
         Long lifetimeInDays = IAB_TIMEPASS_SKUS_TO_DAYS.get(purchaseSku);
         if (lifetimeInDays == null) {
@@ -422,11 +433,12 @@ public class GooglePlayBillingHelper {
         // calculate expiry date based on the lifetime and purchase date
         long lifetimeMillis = lifetimeInDays * 24 * 60 * 60 * 1000;
         long timepassExpiryMillis = purchase.getPurchaseTime() + lifetimeMillis;
-        if (System.currentTimeMillis() < timepassExpiryMillis) {
-            // This time pass is still valid.
-            return true;
-        }
-        return false;
+
+        return System.currentTimeMillis() < timepassExpiryMillis;
+    }
+
+    static boolean isPsiCashPurchase(@NonNull Purchase purchase) {
+        return IAB_PSICASH_SKUS_TO_VALUE.containsKey(purchase.getSku());
     }
 
     Single consumePurchase(Purchase purchase) {
