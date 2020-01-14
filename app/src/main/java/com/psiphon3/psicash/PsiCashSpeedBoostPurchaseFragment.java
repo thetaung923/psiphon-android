@@ -31,7 +31,7 @@ import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.schedulers.Schedulers;
 
-public class PurchaseSpeedBoostFragment extends Fragment {
+public class PsiCashSpeedBoostPurchaseFragment extends Fragment {
     private CompositeDisposable compositeDisposable = new CompositeDisposable();
     private PsiCashStoreViewModel viewModel;
 
@@ -62,7 +62,7 @@ public class PurchaseSpeedBoostFragment extends Fragment {
                     data.putExtra(PsiCashStoreActivity.SPEEDBOOST_CONNECT_PSIPHON_EXTRA, true);
                     activity.setResult(Activity.RESULT_OK, data);
                     activity.finish();
-                } catch (NullPointerException e) {
+                } catch (NullPointerException ignored) {
                 }
             });
         });
@@ -118,13 +118,27 @@ public class PurchaseSpeedBoostFragment extends Fragment {
 
         GridLayout containerLayout = view.findViewById(R.id.purchase_speedboost_grid);
         containerLayout.setColumnCount(columnCount);
-        containerLayout.post(() -> {
-            for (int i = 0; i < containerLayout.getChildCount(); i++) {
-                View child = containerLayout.getChildAt(i);
-                ViewGroup.LayoutParams params = child.getLayoutParams();
-                params.width = containerLayout.getWidth() / columnCount;
-                params.height = params.width * 248 / 185;
-                child.setLayoutParams(params);
+
+        containerLayout.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View v, int left, int top, int right, int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                if (left == 0 && top == 0 && right == 0 && bottom == 0) {
+                    return;
+                }
+                ViewGroup viewGroup = (ViewGroup) v;
+                int childWidth = viewGroup.getWidth() / columnCount;
+                if (childWidth == 0) {
+                    return;
+                }
+                float ratio = 248.0f / 185.0f;
+                for (int i = 0; i < viewGroup.getChildCount(); i++) {
+                    View child = viewGroup.getChildAt(i);
+                    ViewGroup.LayoutParams params = child.getLayoutParams();
+                    params.width = childWidth;
+                    params.height = (int) (childWidth * ratio);
+                    child.setLayoutParams(params);
+                }
+                v.removeOnLayoutChangeListener(this);
             }
         });
 

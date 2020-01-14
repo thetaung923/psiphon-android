@@ -65,39 +65,44 @@ public class PurchaseVerifier {
                     }
                     // Once connected run IAB check and pass PsiCash purchase and
                     // current tunnel state connection data downstream.
-                    return repository.psiCashPurchaseFlowable()
-                            .map(purchase -> new Pair<>(purchase, tunnelState.connectionData()));
+                    return repository.purchaseStateFlowable()
+                            .map(purchaseState -> new Pair<>(purchaseState.purchase(), tunnelState.connectionData()));
                 })
                 .switchMap(pair -> {
                     final Purchase purchase = pair.first;
+                    if (purchase == null || !GooglePlayBillingHelper.isPsiCashPurchase(purchase)) {
+                        return Flowable.empty();
+                    }
+
                     TunnelState.ConnectionData connectionData = pair.second;
                     final int httpProxyPort = connectionData.httpPort();
+
                     // Check if we previously marked this purchase as 'bad'
                     if (invalidPurchaseTokensList.size() > 0 &&
                             invalidPurchaseTokensList.contains(purchase.getPurchaseToken())) {
                         Utils.MyLog.g("PurchaseVerifier: bad PsiCash purchase, continue.");
                         return Flowable.empty();
                     }
+
                     PurchaseVerificationNetworkHelper purchaseVerificationNetworkHelper =
                             new PurchaseVerificationNetworkHelper.Builder(context)
                                     .withHttpProxyPort(httpProxyPort)
                                     .build();
+
                     Utils.MyLog.g("PurchaseVerifier: will try and redeem PsiCash purchase.");
                     return purchaseVerificationNetworkHelper.verifyFlowable(purchase)
                             .flatMap(json -> {
                                         if (TextUtils.isEmpty(json)) {
-                                            // If payload is empty then do not try to JSON decode,
-                                            // remember the bad token and do nothing.
-                                            // TODO: inspect HTTP response for purchases actually reported as bad and consume
-                                            invalidPurchaseTokensList.add(purchase.getPurchaseToken());
                                             Utils.MyLog.g("PurchaseVerifier: PsiCash verification: server returned empty payload.");
                                             return Flowable.empty();
                                         }
                                         boolean success = new JSONObject(json).getBoolean("success");
                                         if (success) {
                                             // Purchase redeemed, consume and send REFRESH_PSICASH_STATE
-                                            compositeDisposable.add(repository.consumePurchase(purchase).subscribe());
-                                            return Flowable.just(VerificationResult.REFRESH_PSICASH_STATE);
+                                            return repository.consumePurchase(purchase)
+                                                    .map(__ -> VerificationResult.REFRESH_PSICASH_STATE)
+                                                    .toFlowable();
+
                                         }
                                         return Flowable.empty();
                                     }
@@ -108,7 +113,7 @@ public class PurchaseVerifier {
                             .onErrorResumeNext(Flowable.empty());
 
                 })
-                .doOnNext(action -> verificationResultListener.onVerificationResult(action))
+                .doOnNext(verificationResultListener::onVerificationResult)
                 .subscribe();
     }
 
@@ -157,6 +162,7 @@ public class PurchaseVerifier {
                         // We already aware of this purchase, do nothing
                         return Flowable.empty();
                     }
+
                     // We have a fresh purchase. Store the purchase token and reset the persisted authorization Id
                     Utils.MyLog.g("PurchaseVerifier: user has new valid subscription purchase.");
                     appPreferences.put(PREFERENCE_PURCHASE_TOKEN, purchase.getPurchaseToken());

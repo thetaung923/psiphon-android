@@ -16,26 +16,20 @@ import android.widget.TextView;
 
 import com.android.billingclient.api.Purchase;
 import com.android.billingclient.api.SkuDetails;
-import com.jakewharton.rxrelay2.PublishRelay;
 import com.psiphon3.billing.GooglePlayBillingHelper;
 import com.psiphon3.psiphonlibrary.Utils;
 import com.psiphon3.subscription.R;
 
 import java.text.NumberFormat;
 import java.util.Collections;
-import java.util.List;
 
 import io.reactivex.Observable;
-import io.reactivex.disposables.Disposable;
 
 public class PsiCashInAppPurchaseFragment extends Fragment {
     private GooglePlayBillingHelper googlePlayBillingHelper;
-    private PublishRelay<List<Purchase>> purchasePublishRelay = PublishRelay.create();
 
     private Scene sceneBuyPsiCash;
     private Scene sceneUnfinishedPsiCashPurchase;
-
-    private Disposable queryPurchasesDisposable;
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
@@ -51,24 +45,18 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
         sceneBuyPsiCash = Scene.getSceneForLayout(sceneRoot, R.layout.buy_psicash_scene, ctx);
         sceneUnfinishedPsiCashPurchase = Scene.getSceneForLayout(sceneRoot, R.layout.buy_psicash_unfinished_purchase_scene, ctx);
 
-        purchasePublishRelay
+        googlePlayBillingHelper.purchaseStateFlowable()
                 .distinctUntilChanged()
-                .doOnNext(purchases -> {
-                    Purchase unfinishedPurchase = null;
-                    for (Purchase purchase : purchases) {
-                        if (GooglePlayBillingHelper.IAB_PSICASH_SKUS_TO_VALUE.containsKey(purchase.getSku())) {
-                            unfinishedPurchase = purchase;
-                            break;
-                        }
-                    }
-                    if (unfinishedPurchase == null) {
+                .doOnNext(purchaseState -> {
+                    final Purchase purchase = purchaseState.purchase();
+                    if (purchase != null && GooglePlayBillingHelper.isPsiCashPurchase(purchase)) {
+                        sceneUnfinishedPsiCashPurchase.setEnterAction(
+                                unfinishedPurchaseEnterAction(progressOverlay, view, purchase));
+                        TransitionManager.go(sceneUnfinishedPsiCashPurchase);
+                    } else {
                         sceneBuyPsiCash.setEnterAction(
                                 buyPsiCashEnterAction(progressOverlay, inflater, container, view));
                         TransitionManager.go(sceneBuyPsiCash);
-                    } else {
-                        sceneUnfinishedPsiCashPurchase.setEnterAction(
-                                unfinishedPurchaseEnterAction(progressOverlay, view, unfinishedPurchase));
-                        TransitionManager.go(sceneUnfinishedPsiCashPurchase);
                     }
                 })
                 .subscribe();
@@ -81,6 +69,17 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
             progressOverlay.setVisibility(View.GONE);
             TextView tv = view.findViewById(R.id.unfinishedPurchaseTitle);
             tv.setText(unfinishedPurchase.getOrderId());
+            Button connectBtn = view.findViewById(R.id.connect_psiphon_btn);
+            connectBtn.setOnClickListener(v -> {
+                final Activity activity = getActivity();
+                try {
+                    Intent data = new Intent();
+                    data.putExtra(PsiCashStoreActivity.SPEEDBOOST_CONNECT_PSIPHON_EXTRA, true);
+                    activity.setResult(Activity.RESULT_OK, data);
+                    activity.finish();
+                } catch (NullPointerException ignored) {
+                }
+            });
         };
     }
 
@@ -88,19 +87,12 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
     public void onResume() {
         super.onResume();
         googlePlayBillingHelper.queryAllSkuDetails();
-        if (queryPurchasesDisposable == null || queryPurchasesDisposable.isDisposed()) {
-            queryPurchasesDisposable = googlePlayBillingHelper.getPurchases()
-                    .onErrorReturnItem(Collections.emptyList())
-                    .subscribe(purchasePublishRelay);
-        }
+        googlePlayBillingHelper.queryAllPurchases();
     }
 
     @Override
     public void onPause() {
         super.onPause();
-        if (queryPurchasesDisposable != null) {
-            queryPurchasesDisposable.dispose();
-        }
     }
 
     private Runnable buyPsiCashEnterAction(View progressOverlay, LayoutInflater inflater, ViewGroup container, View view) {

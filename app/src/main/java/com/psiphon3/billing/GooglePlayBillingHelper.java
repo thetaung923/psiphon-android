@@ -99,14 +99,14 @@ public class GooglePlayBillingHelper {
     private BehaviorRelay<SubscriptionState> subscriptionStateBehaviorRelay;
     private BehaviorRelay<List<SkuDetails>> allSkuDetailsBehaviorRelay;
     private Disposable startIabDisposable;
-    private BehaviorRelay<Purchase> psiCashPurchaseBehaviorRelay;
+    private BehaviorRelay<PurchaseState> purchaseStateBehaviorRelay;
 
 
     private GooglePlayBillingHelper(final Context ctx) {
         purchasesUpdatedRelay = PublishRelay.create();
         compositeDisposable = new CompositeDisposable();
         subscriptionStateBehaviorRelay = BehaviorRelay.create();
-        psiCashPurchaseBehaviorRelay = BehaviorRelay.create();
+        purchaseStateBehaviorRelay = BehaviorRelay.create();
         allSkuDetailsBehaviorRelay = BehaviorRelay.create();
 
         PurchasesUpdatedListener listener = (billingResult, purchases) -> {
@@ -170,8 +170,8 @@ public class GooglePlayBillingHelper {
                 .toFlowable(BackpressureStrategy.LATEST);
     }
 
-    public Flowable<Purchase> psiCashPurchaseFlowable() {
-        return psiCashPurchaseBehaviorRelay
+    public Flowable<PurchaseState> purchaseStateFlowable() {
+        return purchaseStateBehaviorRelay
                 .toFlowable(BackpressureStrategy.LATEST);
     }
 
@@ -249,6 +249,7 @@ public class GooglePlayBillingHelper {
     private void processPurchases(List<Purchase> purchaseList) {
         if (purchaseList == null || purchaseList.size() == 0) {
             subscriptionStateBehaviorRelay.accept(SubscriptionState.noSubscription());
+            purchaseStateBehaviorRelay.accept(PurchaseState.empty());
             return;
         }
 
@@ -271,27 +272,23 @@ public class GooglePlayBillingHelper {
             // [BillingClient.acknowledgePurchaseAsync] inside your app.
             compositeDisposable.add(acknowledgePurchase(purchase).subscribe());
 
-            if (isPsiCashPurchase(purchase)) {
-                psiCashPurchaseBehaviorRelay.accept(purchase);
-                return;
-            } else if (isUnlimitedSubscription(purchase)) {
+            purchaseStateBehaviorRelay.accept(PurchaseState.create(purchase));
+
+            if (isUnlimitedSubscription(purchase)) {
                 subscriptionStateBehaviorRelay.accept(SubscriptionState.unlimitedSubscription(purchase));
-                return;
             } else if (isLimitedSubscription(purchase)) {
                 subscriptionStateBehaviorRelay.accept(SubscriptionState.limitedSubscription(purchase));
-                return;
             } else if (isValidTimePass(purchase)) {
                 subscriptionStateBehaviorRelay.accept(SubscriptionState.timePass(purchase));
-                return;
-            }
+            } else {
+                subscriptionStateBehaviorRelay.accept(SubscriptionState.noSubscription());
 
-            // Check if this purchase is an expired timepass which needs to be consumed
-            if (IAB_TIMEPASS_SKUS_TO_DAYS.containsKey(purchase.getSku())) {
-                compositeDisposable.add(consumePurchase(purchase).subscribe());
+                // Check if this purchase is an expired timepass which needs to be consumed
+                if (IAB_TIMEPASS_SKUS_TO_DAYS.containsKey(purchase.getSku())) {
+                    compositeDisposable.add(consumePurchase(purchase).subscribe());
+                }
             }
         }
-
-        subscriptionStateBehaviorRelay.accept(SubscriptionState.noSubscription());
     }
 
     Flowable<PurchasesUpdate> observeUpdates() {
@@ -437,11 +434,11 @@ public class GooglePlayBillingHelper {
         return System.currentTimeMillis() < timepassExpiryMillis;
     }
 
-    static boolean isPsiCashPurchase(@NonNull Purchase purchase) {
+    static public boolean isPsiCashPurchase(@NonNull Purchase purchase) {
         return IAB_PSICASH_SKUS_TO_VALUE.containsKey(purchase.getSku());
     }
 
-    Single consumePurchase(Purchase purchase) {
+    Single<String> consumePurchase(Purchase purchase) {
         ConsumeParams params = ConsumeParams
                 .newBuilder()
                 .setPurchaseToken(purchase.getPurchaseToken())

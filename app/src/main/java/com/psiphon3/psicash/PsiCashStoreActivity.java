@@ -1,7 +1,6 @@
 package com.psiphon3.psicash;
 
 import android.arch.lifecycle.ViewModelProviders;
-import android.content.Context;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
 import android.support.design.widget.TabLayout;
@@ -13,13 +12,11 @@ import android.view.View;
 import android.widget.TextView;
 
 import com.psiphon3.psiphonlibrary.LocalizedActivities;
-import com.psiphon3.psiphonlibrary.Utils;
 import com.psiphon3.subscription.R;
 
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import io.reactivex.Single;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.schedulers.Schedulers;
 
@@ -135,7 +132,7 @@ public class PsiCashStoreActivity extends LocalizedActivities.AppCompatActivity 
                 case 0:
                     return new PsiCashInAppPurchaseFragment();
                 case 1:
-                    return new PurchaseSpeedBoostFragment();
+                    return new PsiCashSpeedBoostPurchaseFragment();
                 default:
                     return null;
             }
