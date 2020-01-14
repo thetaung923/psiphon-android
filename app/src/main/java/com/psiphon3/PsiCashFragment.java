@@ -154,38 +154,6 @@ public class PsiCashFragment extends Fragment implements MviView<PsiCashIntent, 
     }
 
     @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-
-        PsiCashListener psiCashListener = new PsiCashListener() {
-            @Override
-            public void onNewExpiringPurchase(Context context, PsiCashLib.Purchase purchase) {
-                // Store authorization from the purchase
-                Utils.MyLog.g("PsiCash::onNewExpiringPurchase: storing new authorization of accessType " + purchase.authorization.accessType);
-                Authorization authorization = Authorization.fromBase64Encoded(purchase.authorization.encoded);
-                Authorization.storeAuthorization(context, authorization);
-
-                // Send broadcast to restart the tunnel
-                Utils.MyLog.g("PsiCash::onNewExpiringPurchase: send tunnel restart broadcast");
-                android.content.Intent intent = new android.content.Intent(BroadcastIntent.GOT_NEW_EXPIRING_PURCHASE);
-                LocalBroadcastManager.getInstance(getActivity()).sendBroadcast(intent);
-            }
-
-            @Override
-            public void onNewReward(Context context, long reward) {
-                try {
-                    // Store the reward amount
-                    PsiCashClient.getInstance(context).putVideoReward(reward);
-                    // reload local PsiCash to update the view with the new reward amount
-                    intentsPublishRelay.accept(PsiCashIntent.GetPsiCashLocal.create());
-                } catch (PsiCashException e) {
-                    Utils.MyLog.g("PsiCash::onNewReward: failed to store video reward: " + e);
-                }
-            }
-        };
-    }
-
-    @Override
     public void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
 
