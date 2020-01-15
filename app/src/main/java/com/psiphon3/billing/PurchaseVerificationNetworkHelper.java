@@ -26,6 +26,7 @@ import com.psiphon3.psiphonlibrary.Utils.MyLog;
 
 import org.json.JSONObject;
 
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.util.concurrent.TimeUnit;
@@ -106,45 +107,66 @@ public class PurchaseVerificationNetworkHelper {
                             .post(requestBody)
                             .build();
 
-                    if(httpProxyPort > 0) {
+                    if (httpProxyPort > 0) {
                         okHttpClientBuilder.proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress("localhost", httpProxyPort)));
                     }
 
-                    return okHttpClientBuilder.build().newCall(request).execute();
+                    try {
+                        return okHttpClientBuilder.build().newCall(request).execute();
+                    } catch (IOException e) {
+                        throw new RetriableException(e.toString());
+                    }
                 })
-                .retryWhen(
-                        errors -> errors
-                                .zipWith(Observable.range(1, TRIES_COUNT), (err, i) ->
-                                {
-                                    if(i < TRIES_COUNT ) {
-                                        // exponential backoff with timer
-                                        int retryInSeconds = (int) Math.pow(4, i);
-                                        MyLog.g("PurchaseVerifier: will retry authorization request in " +
-                                                retryInSeconds +
-                                                " seconds" +
-                                                " due to error: " + err);
-                                       return  Observable.timer((long) retryInSeconds, TimeUnit.SECONDS);
-                                    } // else
-                                    return Observable.error(err);
-                                })
-                                .flatMap(x -> x))
                 .map(response -> {
                             try {
-                                if(response.isSuccessful() && response.body() != null) {
+                                if (response.isSuccessful() && response.body() != null) {
                                     return response.body().string();
                                 } else {
-                                    MyLog.g("PurchaseVerifier: bad response code from verification server: " + response.code());
-                                    return "";
+                                    String msg = "PurchaseVerifier: bad response code from verification server: " + response.code();
+                                    MyLog.g(msg);
+                                    final RuntimeException e;
+                                    if (response.code() >= 400 && response.code() <= 499) {
+                                        e = new FatalException(msg);
+                                    } else {
+                                        e = new RetriableException(msg);
+                                    }
+                                    throw e;
                                 }
                             } finally {
-                                if(response.body() != null) {
+                                if (response.body() != null) {
                                     response.body().close();
                                 }
                             }
                         }
                 )
+                .retryWhen(errors ->
+                        errors.zipWith(Observable.range(1, TRIES_COUNT), (err, i) -> {
+                            if (i < TRIES_COUNT && (err instanceof RetriableException)) {
+                                // exponential backoff with timer
+                                int retryInSeconds = (int) Math.pow(4, i);
+                                MyLog.g("PurchaseVerifier: will retry authorization request in " +
+                                        retryInSeconds +
+                                        " seconds" +
+                                        " due to error: " + err);
+                                return Observable.timer((long) retryInSeconds, TimeUnit.SECONDS);
+                            } // else
+                            return Observable.error(err);
+                        }).flatMap(x -> x))
                 .toFlowable(BackpressureStrategy.LATEST)
                 .subscribeOn(Schedulers.newThread())
                 .observeOn(AndroidSchedulers.mainThread());
     }
+
+    private class RetriableException extends RuntimeException {
+        RetriableException(String cause) {
+            super(cause);
+        }
+    }
+
+    private class FatalException extends RuntimeException {
+        FatalException(String cause) {
+            super(cause);
+        }
+    }
+
 }
