@@ -101,6 +101,12 @@ public class PsiCashSpeedBoostPurchaseFragment extends Fragment {
         return view;
     }
 
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        compositeDisposable.dispose();
+    }
+
     private void populateSpeedBoostPurchases(View view, PsiCashModel.PsiCash psiCash) {
         final Activity activity = getActivity();
         if (activity == null || psiCash == null) {
@@ -121,7 +127,8 @@ public class PsiCashSpeedBoostPurchaseFragment extends Fragment {
 
         containerLayout.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
             @Override
-            public void onLayoutChange(View v, int left, int top, int right, int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
+            public void onLayoutChange(View v, int left, int top, int right, int bottom, int oldLeft,
+                                       int oldTop, int oldRight, int oldBottom) {
                 if (left == 0 && top == 0 && right == 0 && bottom == 0) {
                     return;
                 }

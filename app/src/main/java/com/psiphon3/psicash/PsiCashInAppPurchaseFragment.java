@@ -1,6 +1,7 @@
 package com.psiphon3.psicash;
 
 import android.app.Activity;
+import android.arch.lifecycle.ViewModelProviders;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
@@ -23,17 +24,24 @@ import com.psiphon3.subscription.R;
 import java.text.NumberFormat;
 import java.util.Collections;
 
+import io.reactivex.Flowable;
 import io.reactivex.Observable;
+import io.reactivex.disposables.CompositeDisposable;
 
 public class PsiCashInAppPurchaseFragment extends Fragment {
     private GooglePlayBillingHelper googlePlayBillingHelper;
+    private PsiCashStoreViewModel viewModel;
+    private CompositeDisposable compositeDisposable = new CompositeDisposable();
 
-    private Scene sceneBuyPsiCash;
-    private Scene sceneUnfinishedPsiCashPurchase;
+    private Scene sceneBuyPsiCashFromPlayStore;
+    private Scene sceneConnectToFinishPsiCashPurchase;
+    private Scene sceneWaitFinishPsiCashPurchase;
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
+        viewModel = ViewModelProviders.of(getActivity()).get(PsiCashStoreViewModel.class);
+
         Context ctx = getContext();
         googlePlayBillingHelper = GooglePlayBillingHelper.getInstance(ctx);
 
@@ -42,61 +50,12 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
         ViewGroup sceneRoot = view.findViewById(R.id.scene_root);
         View progressOverlay = view.findViewById(R.id.progress_overlay);
 
-        sceneBuyPsiCash = Scene.getSceneForLayout(sceneRoot, R.layout.buy_psicash_scene, ctx);
-        sceneUnfinishedPsiCashPurchase = Scene.getSceneForLayout(sceneRoot, R.layout.buy_psicash_unfinished_purchase_scene, ctx);
+        sceneBuyPsiCashFromPlayStore = Scene.getSceneForLayout(sceneRoot, R.layout.psicash_buy_from_playstore_scene, ctx);
+        sceneConnectToFinishPsiCashPurchase = Scene.getSceneForLayout(sceneRoot, R.layout.psicash_connect_to_finish_purchase_scene, ctx);
+        sceneWaitFinishPsiCashPurchase = Scene.getSceneForLayout(sceneRoot, R.layout.psicash_wait_to_finish_purchase_scene, ctx);
 
-        googlePlayBillingHelper.purchaseStateFlowable()
-                .distinctUntilChanged()
-                .doOnNext(purchaseState -> {
-                    final Purchase purchase = purchaseState.purchase();
-                    if (purchase != null && GooglePlayBillingHelper.isPsiCashPurchase(purchase)) {
-                        sceneUnfinishedPsiCashPurchase.setEnterAction(
-                                unfinishedPurchaseEnterAction(progressOverlay, view, purchase));
-                        TransitionManager.go(sceneUnfinishedPsiCashPurchase);
-                    } else {
-                        sceneBuyPsiCash.setEnterAction(
-                                buyPsiCashEnterAction(progressOverlay, inflater, container, view));
-                        TransitionManager.go(sceneBuyPsiCash);
-                    }
-                })
-                .subscribe();
-
-        return view;
-    }
-
-    private Runnable unfinishedPurchaseEnterAction(View progressOverlay, View view, Purchase unfinishedPurchase) {
-        return () -> {
-            progressOverlay.setVisibility(View.GONE);
-            TextView tv = view.findViewById(R.id.unfinishedPurchaseTitle);
-            tv.setText(unfinishedPurchase.getOrderId());
-            Button connectBtn = view.findViewById(R.id.connect_psiphon_btn);
-            connectBtn.setOnClickListener(v -> {
-                final Activity activity = getActivity();
-                try {
-                    Intent data = new Intent();
-                    data.putExtra(PsiCashStoreActivity.SPEEDBOOST_CONNECT_PSIPHON_EXTRA, true);
-                    activity.setResult(Activity.RESULT_OK, data);
-                    activity.finish();
-                } catch (NullPointerException ignored) {
-                }
-            });
-        };
-    }
-
-    @Override
-    public void onResume() {
-        super.onResume();
-        googlePlayBillingHelper.queryAllSkuDetails();
-        googlePlayBillingHelper.queryAllPurchases();
-    }
-
-    @Override
-    public void onPause() {
-        super.onPause();
-    }
-
-    private Runnable buyPsiCashEnterAction(View progressOverlay, LayoutInflater inflater, ViewGroup container, View view) {
-        return () -> googlePlayBillingHelper.allSkuDetailsSingle()
+        sceneBuyPsiCashFromPlayStore.setEnterAction(() ->
+                compositeDisposable.add(googlePlayBillingHelper.allSkuDetailsSingle()
                 .toObservable()
                 .flatMap(Observable::fromIterable)
                 .filter(skuDetails -> {
@@ -118,13 +77,13 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
                     Button btn = psicashPurchaseItemView.findViewById(R.id.psicash_purchase_sku_item_price);
                     btn.setText(R.string.psicash_purchase_free_button_price);
                     btn.setOnClickListener(v -> {
-                        final Activity activity = getActivity();
+                        final Activity activity1 = getActivity();
                         try {
                             Intent data = new Intent();
                             data.putExtra(PsiCashStoreActivity.PURCHASE_PSICASH_GET_FREE, true);
-                            activity.setResult(Activity.RESULT_OK, data);
-                            activity.finish();
-                        } catch (NullPointerException e) {
+                            activity1.setResult(Activity.RESULT_OK, data);
+                            activity1.finish();
+                        } catch (NullPointerException ignored) {
                         }
                     });
 
@@ -171,6 +130,69 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
                     }
 
                 })
-                .subscribe();
+                .subscribe()));
+
+        sceneConnectToFinishPsiCashPurchase.setEnterAction(
+                () -> {
+                    progressOverlay.setVisibility(View.GONE);
+                    Button connectBtn = view.findViewById(R.id.connect_psiphon_btn);
+                    connectBtn.setOnClickListener(v -> {
+                        final Activity activity = getActivity();
+                        try {
+                            Intent data = new Intent();
+                            data.putExtra(PsiCashStoreActivity.SPEEDBOOST_CONNECT_PSIPHON_EXTRA, true);
+                            activity.setResult(Activity.RESULT_OK, data);
+                            activity.finish();
+                        } catch (NullPointerException ignored) {
+                        }
+                    });
+                });
+
+        sceneWaitFinishPsiCashPurchase.setEnterAction(
+                () -> progressOverlay.setVisibility(View.GONE));
+
+        compositeDisposable.add(googlePlayBillingHelper.purchaseStateFlowable()
+                .distinctUntilChanged()
+                .switchMap(purchaseState -> {
+                    final Purchase purchase = purchaseState.purchase();
+                    if (purchase != null && GooglePlayBillingHelper.isPsiCashPurchase(purchase)) {
+                        return viewModel.getTunnelServiceInteractor().tunnelStateFlowable()
+                                .map(tunnelState ->
+                                        tunnelState.isStopped() ?
+                                                SceneState.CONNECT_TO_FINISH :
+                                                SceneState.WAIT_TO_FINISH);
+                    } else {
+                        return Flowable.just(SceneState.BUY_FROM_PLAYSTORE);
+                    }
+                })
+                .doOnNext(sceneState -> {
+                    if (sceneState == SceneState.CONNECT_TO_FINISH)
+                        TransitionManager.go(sceneConnectToFinishPsiCashPurchase);
+                    else if (sceneState == SceneState.WAIT_TO_FINISH) {
+                        TransitionManager.go(sceneWaitFinishPsiCashPurchase);
+                    } else if (sceneState == SceneState.BUY_FROM_PLAYSTORE) {
+                        TransitionManager.go(sceneBuyPsiCashFromPlayStore);
+                    }
+                })
+                .subscribe());
+
+        return view;
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        compositeDisposable.dispose();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        googlePlayBillingHelper.queryAllSkuDetails();
+        googlePlayBillingHelper.queryAllPurchases();
+    }
+
+    private enum  SceneState {
+        WAIT_TO_FINISH, BUY_FROM_PLAYSTORE, CONNECT_TO_FINISH
     }
 }
