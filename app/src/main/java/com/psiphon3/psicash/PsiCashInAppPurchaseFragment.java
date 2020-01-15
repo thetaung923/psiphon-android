@@ -157,6 +157,8 @@ public class PsiCashInAppPurchaseFragment extends Fragment {
                     final Purchase purchase = purchaseState.purchase();
                     if (purchase != null && GooglePlayBillingHelper.isPsiCashPurchase(purchase)) {
                         return viewModel.getTunnelServiceInteractor().tunnelStateFlowable()
+                                .filter(state -> !state.isUnknown())
+                                .distinctUntilChanged()
                                 .map(tunnelState ->
                                         tunnelState.isStopped() ?
                                                 SceneState.CONNECT_TO_FINISH :
