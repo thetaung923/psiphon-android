@@ -145,11 +145,8 @@ public class TunnelServiceInteractor {
     public void scheduleRunningTunnelServiceRestart(Context context, Runnable startServiceRunnable) {
         tunnelStateFlowable()
                 .filter(tunnelState -> !tunnelState.isUnknown())
-                .timeout(
-                        Flowable.timer(1000, TimeUnit.MILLISECONDS),
-                        ignored -> Flowable.never()
-                )
                 .firstOrError()
+                .timeout(1000, TimeUnit.MILLISECONDS)
                 .toMaybe()
                 .onErrorResumeNext(Maybe.empty())
                 // If the running service doesn't need to be changed from WDM to BOM or vice versa we will

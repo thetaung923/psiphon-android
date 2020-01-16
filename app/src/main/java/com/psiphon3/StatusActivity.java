@@ -60,6 +60,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import io.reactivex.Maybe;
 import io.reactivex.disposables.Disposable;
 
 public class StatusActivity
@@ -112,33 +113,38 @@ public class StatusActivity
                 !getIntent().getBooleanExtra(INTENT_EXTRA_PREVENT_AUTO_START, false);
     }
 
+    // Returns an object only if tunnel should be auto-started,
+    // completes with no value otherwise.
+    private Maybe<Object> autoStartMaybe() {
+        boolean shouldAutoStart = shouldAutoStart();
+        preventAutoStart();
+
+        // Complete immediately if shouldn't auto-start
+        if (!shouldAutoStart) {
+            return Maybe.empty();
+        }
+
+        return tunnelServiceInteractor.tunnelStateFlowable()
+                .filter(tunnelState -> !tunnelState.isUnknown())
+                .firstOrError()
+                .map(tunnelState -> !tunnelState.isRunning())
+                // make sure this subscription times out within reasonable interval
+                .timeout(1000, TimeUnit.MILLISECONDS)
+                .onErrorReturnItem(false)
+                .flatMapMaybe(aBoolean -> aBoolean ? Maybe.just(new Object()) : Maybe.empty());
+    }
+
+
     @Override
     protected void onResume() {
         super.onResume();
         // Auto-start on app first run
         if (autoStartDisposable == null || autoStartDisposable.isDisposed()) {
-            autoStartDisposable = getAutoStartDisposable();
+            autoStartDisposable = autoStartMaybe()
+                    .doOnSuccess(__ -> startUp())
+                    .subscribe();
             compositeDisposable.add(autoStartDisposable);
         }
-    }
-
-    private Disposable getAutoStartDisposable() {
-        return tunnelServiceInteractor.tunnelStateFlowable()
-                .filter(tunnelState -> !tunnelState.isUnknown())
-                .firstOrError()
-                // send down true if not running so the logs from
-                // previous sessions would be removed.
-                .map(tunnelState -> !tunnelState.isRunning())
-                // make sure this subscription times out within reasonable interval
-                .timeout(2000, TimeUnit.MILLISECONDS)
-                .onErrorReturnItem(false)
-                .doOnSuccess(isStopped -> {
-                    if (isStopped && shouldAutoStart()) {
-                        startUp();
-                    }
-                    preventAutoStart();
-                })
-                .subscribe();
     }
 
     private void setUpBanner() {
