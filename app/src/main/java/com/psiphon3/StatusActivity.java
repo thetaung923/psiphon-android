@@ -104,6 +104,11 @@ public class StatusActivity
         m_firstRun = false;
     }
 
+    private boolean shouldAutoStart() {
+        return m_firstRun &&
+                !getIntent().getBooleanExtra(INTENT_EXTRA_PREVENT_AUTO_START, false);
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -119,10 +124,10 @@ public class StatusActivity
                         .timeout(2000, TimeUnit.MILLISECONDS)
                         .onErrorReturnItem(false)
                         .doOnSuccess(isStopped -> {
-                            if (isStopped && m_firstRun) {
-                                preventAutoStart();
+                            if (isStopped && shouldAutoStart()) {
                                 startUp();
                             }
+                            preventAutoStart();
                         })
                         .subscribe()
         );
