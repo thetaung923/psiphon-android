@@ -69,6 +69,7 @@ public class TunnelServiceInteractor {
     private Disposable restartServiceDisposable = null;
     private Disposable sendMessageDisposable = null;
 
+    private final long bindTimeoutMillis;
     private boolean isPaused = true;
 
     public TunnelServiceInteractor(Context context) {
@@ -97,18 +98,21 @@ public class TunnelServiceInteractor {
             }
         };
         LocalBroadcastManager.getInstance(context).registerReceiver(broadcastReceiver, intentFilter);
-    }
 
-    public void resume() {
-        isPaused = false;
-        long bindTimeoutMillis = 1000;
+        // Calculate binding timeout based on the API level
         if (Build.VERSION.SDK_INT >= 24) {
             bindTimeoutMillis = 250;
         } else if (Build.VERSION.SDK_INT >= 22) {
             bindTimeoutMillis = 400;
         } else if (Build.VERSION.SDK_INT >= 14) {
-            bindTimeoutMillis = 500;
+            bindTimeoutMillis = 600;
+        } else {
+            bindTimeoutMillis = 1000;
         }
+    }
+
+    public void resume() {
+        isPaused = false;
         registerWithService(bindTimeoutMillis);
     }
 
@@ -383,9 +387,7 @@ public class TunnelServiceInteractor {
                         context.bindService(intent, con, 0);
                         return Observable.create(con);
                     },
-                    __ -> {
-                        unbind(context);
-                    })
+                    __ -> unbind(context))
                     .timeout(
                             Observable.timer(2000, TimeUnit.MILLISECONDS),
                             ignored -> Observable.never()
