@@ -60,6 +60,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import io.reactivex.disposables.Disposable;
+
 public class StatusActivity
         extends com.psiphon3.psiphonlibrary.MainBase.TabbedActivityBase {
     public static final String BANNER_FILE_NAME = "bannerImage";
@@ -68,6 +70,7 @@ public class StatusActivity
     private ImageView m_banner;
     private boolean m_tunnelWholeDevicePromptShown = false;
     private boolean m_firstRun = true;
+    private Disposable autoStartDisposable;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -113,24 +116,29 @@ public class StatusActivity
     protected void onResume() {
         super.onResume();
         // Auto-start on app first run
-        compositeDisposable.add(
-                tunnelServiceInteractor.tunnelStateFlowable()
-                        .filter(tunnelState -> !tunnelState.isUnknown())
-                        .firstOrError()
-                        // send down true if not running so the logs from
-                        // previous sessions would be removed.
-                        .map(tunnelState -> !tunnelState.isRunning())
-                        // make sure this subscription times out within reasonable interval
-                        .timeout(2000, TimeUnit.MILLISECONDS)
-                        .onErrorReturnItem(false)
-                        .doOnSuccess(isStopped -> {
-                            if (isStopped && shouldAutoStart()) {
-                                startUp();
-                            }
-                            preventAutoStart();
-                        })
-                        .subscribe()
-        );
+        if (autoStartDisposable == null || autoStartDisposable.isDisposed()) {
+            autoStartDisposable = getAutoStartDisposable();
+            compositeDisposable.add(autoStartDisposable);
+        }
+    }
+
+    private Disposable getAutoStartDisposable() {
+        return tunnelServiceInteractor.tunnelStateFlowable()
+                .filter(tunnelState -> !tunnelState.isUnknown())
+                .firstOrError()
+                // send down true if not running so the logs from
+                // previous sessions would be removed.
+                .map(tunnelState -> !tunnelState.isRunning())
+                // make sure this subscription times out within reasonable interval
+                .timeout(2000, TimeUnit.MILLISECONDS)
+                .onErrorReturnItem(false)
+                .doOnSuccess(isStopped -> {
+                    if (isStopped && shouldAutoStart()) {
+                        startUp();
+                    }
+                    preventAutoStart();
+                })
+                .subscribe();
     }
 
     private void setUpBanner() {
