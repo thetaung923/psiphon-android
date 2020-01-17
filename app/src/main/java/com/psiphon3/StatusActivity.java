@@ -44,6 +44,7 @@ import android.widget.TabHost;
 import android.widget.Toast;
 
 import com.psiphon3.psiphonlibrary.EmbeddedValues;
+import com.psiphon3.psiphonlibrary.LoggingProvider;
 import com.psiphon3.psiphonlibrary.PsiphonConstants;
 import com.psiphon3.psiphonlibrary.TunnelManager;
 import com.psiphon3.psiphonlibrary.Utils;
@@ -141,7 +142,18 @@ public class StatusActivity
         // Auto-start on app first run
         if (autoStartDisposable == null || autoStartDisposable.isDisposed()) {
             autoStartDisposable = autoStartMaybe()
-                    .doOnSuccess(__ -> startUp())
+                    .doOnSuccess(__ -> {
+                        LoggingProvider.LogDatabaseHelper.truncateLogs(this, true);
+                        startUp();
+                    })
+                    .doOnComplete(() -> {
+                        // Load new logs from the logging provider now
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+                            m_loggingObserver.dispatchChange(false, LoggingProvider.INSERT_URI);
+                        } else {
+                            m_loggingObserver.dispatchChange(false);
+                        }
+                    })
                     .subscribe();
             compositeDisposable.add(autoStartDisposable);
         }

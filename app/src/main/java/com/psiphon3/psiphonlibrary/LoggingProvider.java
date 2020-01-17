@@ -322,6 +322,8 @@ public class LoggingProvider extends ContentProvider {
             @Override
             protected Void doInBackground(Void... params) {
                 LogDatabaseHelper.truncateLogsHelper(mContext, mFull);
+                // Force the UI to display logs already loaded into the StatusList message history
+                LocalBroadcastManager.getInstance(mContext).sendBroadcast(new Intent(MainBase.TabbedActivityBase.STATUS_ENTRY_AVAILABLE));
                 return null;
             }
         }

@@ -165,7 +165,7 @@ public abstract class MainBase {
         private Toast m_invalidProxySettingsToast;
         private Button m_moreOptionsButton;
         private Button m_openBrowserButton;
-        private LoggingObserver m_loggingObserver;
+        protected LoggingObserver m_loggingObserver;
         protected CompositeDisposable compositeDisposable = new CompositeDisposable();
         protected TunnelServiceInteractor tunnelServiceInteractor;
         private Disposable handleNfcIntentDisposable;
@@ -531,29 +531,7 @@ public abstract class MainBase {
             loggingObserverThread.start();
             m_loggingObserver = new LoggingObserver(this, new Handler(loggingObserverThread.getLooper()));
 
-            // Force the UI to display logs already loaded into the StatusList message history
-            LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent(STATUS_ENTRY_AVAILABLE));
-
             tunnelServiceInteractor = new TunnelServiceInteractor(getApplicationContext());
-
-            // remove logs from previous sessions
-            compositeDisposable.add(
-                    tunnelServiceInteractor.tunnelStateFlowable()
-                            .filter(tunnelState -> !tunnelState.isUnknown())
-                            .firstOrError()
-                            // send down true if not running so the logs from
-                            // previous sessions would be removed.
-                            .map(tunnelState -> !tunnelState.isRunning())
-                            // make sure this subscription times out withing reasonable interval
-                            .timeout(1000, TimeUnit.MILLISECONDS)
-                            .onErrorReturnItem(false)
-                            .doOnSuccess(shouldTruncateLogs -> {
-                                if (shouldTruncateLogs) {
-                                    LoggingProvider.LogDatabaseHelper.truncateLogs(this, true);
-                                }
-                            })
-                            .subscribe()
-            );
 
             // Get the connection help buttons
             mGetHelpConnectingButton = findViewById(R.id.getHelpConnectingButton);
@@ -772,13 +750,6 @@ public abstract class MainBase {
         @Override
         protected void onResume() {
             super.onResume();
-
-            // Load new logs from the logging provider now
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
-                m_loggingObserver.dispatchChange(false, LoggingProvider.INSERT_URI);
-            } else {
-                m_loggingObserver.dispatchChange(false);
-            }
 
             // Load new logs from the logging provider when it changes
             getContentResolver().registerContentObserver(LoggingProvider.INSERT_URI, true, m_loggingObserver);
