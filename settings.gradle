@@ -1,0 +1,3 @@
+include ':PsiphonAndroidLibrary'
+include ':zircobrowser'
+include ':PsiphonAndroid'
