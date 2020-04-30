@@ -19,27 +19,16 @@
 
 package com.psiphon3.psiphonlibrary;
 
-import java.io.IOException;
-import java.io.InterruptedIOException;
-import java.net.ConnectException;
-import java.net.Inet6Address;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.NetworkInterface;
-import java.net.Socket;
-import java.net.SocketException;
-import java.nio.channels.ClosedByInterruptException;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
-import java.nio.channels.SocketChannel;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import android.content.Context;
+import android.os.Build;
+import android.os.SystemClock;
+import android.util.Pair;
+
+import com.mifmif.common.regex.Generex;
+import com.psiphon3.psiphonlibrary.MeekClient.IAbortIndicator;
+import com.psiphon3.psiphonlibrary.ServerInterface.PsiphonServerInterfaceException;
+import com.psiphon3.psiphonlibrary.ServerInterface.ServerEntry;
+import com.psiphon3.psiphonlibrary.Utils.MyLog;
 
 import org.apache.http.ConnectionReuseStrategy;
 import org.apache.http.HttpEntity;
@@ -88,17 +77,34 @@ import org.apache.http.protocol.RequestTargetHostHC4;
 import org.apache.http.protocol.RequestUserAgentHC4;
 import org.apache.http.util.EntityUtilsHC4;
 
-import android.content.Context;
-import android.os.Build;
-import android.os.SystemClock;
-import android.util.Pair;
-import ch.ethz.ssh2.Connection;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InterruptedIOException;
+import java.io.OutputStream;
+import java.net.ConnectException;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.NetworkInterface;
+import java.net.Socket;
+import java.net.SocketException;
+import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
+import java.nio.channels.ClosedByInterruptException;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.nio.channels.SocketChannel;
+import java.nio.channels.WritableByteChannel;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-import com.mifmif.common.regex.Generex;
-import com.psiphon3.psiphonlibrary.MeekClient.IAbortIndicator;
-import com.psiphon3.psiphonlibrary.ServerInterface.PsiphonServerInterfaceException;
-import com.psiphon3.psiphonlibrary.ServerInterface.ServerEntry;
-import com.psiphon3.psiphonlibrary.Utils.MyLog;
+import ch.ethz.ssh2.Connection;
 
 public class ServerSelector implements IAbortIndicator
 {
@@ -126,13 +132,13 @@ public class ServerSelector implements IAbortIndicator
 
                         Arrays.asList(PsiphonConstants.RELAY_PROTOCOL_FRONTED_MEEK_OSSH)
                         );
-        
+
         public synchronized void rotateTarget()
         {
             MyLog.w(R.string.rotating_target_protocol_state, MyLog.Sensitivity.NOT_SENSITIVE);
             mCurrentTarget = (mCurrentTarget + 1) % mTargets.size();
         }
-        
+
         public synchronized String selectProtocol(ServerEntry serverEntry)
         {
             for (String protocol : mTargets.get(mCurrentTarget))
@@ -144,7 +150,7 @@ public class ServerSelector implements IAbortIndicator
             }
             return null;
         }
-        
+
         public synchronized String currentProtocols()
         {
             StringBuilder currentProtocolsBuilder = new StringBuilder();
@@ -156,7 +162,7 @@ public class ServerSelector implements IAbortIndicator
             return currentProtocolsBuilder.toString().trim();
         }
     }
-    
+
     private final int NUM_THREADS = 10;
 
     private final int SHUTDOWN_POLL_MILLISECONDS = 50;
@@ -228,7 +234,7 @@ public class ServerSelector implements IAbortIndicator
             try
             {
                 String protocol = ServerSelector.this.targetProtocolState.selectProtocol(this.entry);
-                
+
                 // This check is already performed in the coordinator which filters out workers for
                 // server entries that don't support the target protocol, but we're leaving this here
                 // anyways.
@@ -241,7 +247,7 @@ public class ServerSelector implements IAbortIndicator
                 // Even though the ServerEntry here is a clone, assigning to it
                 // works because ServerSelector merges it back in for the servers
                 // that respond.
-                
+
                 this.entry.connType = protocol;
 
                 if (protocol.equals(PsiphonConstants.RELAY_PROTOCOL_OSSH))
@@ -251,12 +257,12 @@ public class ServerSelector implements IAbortIndicator
 
                         HttpHost proxyHttpHost = new HttpHost(proxySettings.proxyHost,
                                 proxySettings.proxyPort);
-                        
+
                         HttpHost targetHttpHost = new HttpHost(this.entry.ipAddress,
                                 this.entry.getPreferredReachablityTestPort());
-                        
+
 						this.socket = httpTunnelSocket(protectSocketsRequired,
-								MAX_WORK_TIME_MILLISECONDS, proxyHttpHost, targetHttpHost, 
+								MAX_WORK_TIME_MILLISECONDS, proxyHttpHost, targetHttpHost,
 								PsiphonData.getPsiphonData().getProxyCredentials());
 
                     }
@@ -282,7 +288,7 @@ public class ServerSelector implements IAbortIndicator
                 {
 
                     this.meekClient = new MeekClient(
-                    		
+
                             protectSocketsRequired ? ServerSelector.this.protectSocket : null,
                             ServerSelector.this.serverInterface,
                             ServerSelector.this.clientSessionId,
@@ -303,7 +309,7 @@ public class ServerSelector implements IAbortIndicator
                     Collections.shuffle(this.entry.meekFrontingAddresses);
                     // meekFrontingAddresses is now always populated with at least meekFrontingDomain
                     String frontingAddress = this.entry.meekFrontingAddresses.get(0);
-                    
+
                     // IMPORTANT: This is done at server selection time, not when the (potentially large) embedded
                     // server list is read and decoded (in the ServerInterface constructor), because that can be CPU
                     // intensive and can hang the app.
@@ -311,7 +317,7 @@ public class ServerSelector implements IAbortIndicator
                     {
                         frontingAddress = new Generex(this.entry.meekFrontingAddressesRegex).random();
                     }
-                    
+
                     this.meekClient = new MeekClient(
                             protectSocketsRequired ? ServerSelector.this.protectSocket : null,
                             ServerSelector.this.serverInterface,
@@ -345,7 +351,7 @@ public class ServerSelector implements IAbortIndicator
                     {
                         this.sshErrorMessage = e.getMessage();
                     }
-                        
+
                     this.responded = (this.sshConnection != null);
                 }
             }
@@ -384,10 +390,10 @@ public class ServerSelector implements IAbortIndicator
                 {
                     MyLog.w(R.string.network_proxy_connect_exception, MyLog.Sensitivity.NOT_SENSITIVE, e.getLocalizedMessage());
                 }
-            } 
-            catch (HttpException e) 
+            }
+            catch (HttpException e)
             {
-                if (proxySettings != null) 
+                if (proxySettings != null)
                 {
                     MyLog.w(R.string.network_proxy_connect_exception, MyLog.Sensitivity.NOT_SENSITIVE, e.getLocalizedMessage());
                 }
@@ -427,7 +433,7 @@ public class ServerSelector implements IAbortIndicator
         private Socket connectSocket(boolean protectSocketsRequired, long timeout, String host, int port)
         	    throws IOException
         	    {
-        	        SocketChannel channel = SocketChannel.open();
+        	        final SocketChannel channel = SocketChannel.open();
 
         	        if (protectSocketsRequired)
         	        {
@@ -462,7 +468,37 @@ public class ServerSelector implements IAbortIndicator
         	        if (success)
         	        {
         	            channel.configureBlocking(true);
-        	            return channel.socket();
+                        if (Build.VERSION.SDK_INT < 24) {
+                            return channel.socket();
+                        }
+// Fixes deadlock on Android N
+// Idea is taken from https://github.com/ubergeek42/weechat-android/commit/308807b9ec082721185ae6c315c50712a111db39
+                        return new Socket() {
+                            @Override
+                            public InputStream getInputStream() throws IOException {
+                                return channel.socket().getInputStream();
+                            }
+
+                            @Override
+                            public OutputStream getOutputStream() throws IOException {
+                                return Channels.newOutputStream(new WritableByteChannel() {
+                                    @Override
+                                    public int write(ByteBuffer byteBuffer) throws IOException {
+                                        return channel.write(byteBuffer);
+                                    }
+
+                                    @Override
+                                    public boolean isOpen() {
+                                        return channel.isOpen();
+                                    }
+
+                                    @Override
+                                    public void close() throws IOException {
+                                        channel.close();
+                                    }
+                                });
+                            }
+                        };
         	        }
         	        else
         	        {
@@ -610,7 +646,7 @@ public class ServerSelector implements IAbortIndicator
                     // We have a server
                     break;
                 }
-                
+
                 // After failing to establish a connection, rotate to the next
                 // set of target protocols.
                 ServerSelector.this.targetProtocolState.rotateTarget();
@@ -712,7 +748,7 @@ public class ServerSelector implements IAbortIndicator
 
             if (proxySettings != null)
             {
-            	
+
                 Credentials proxyCredentials = PsiphonData.getPsiphonData().getProxyCredentials();
                 MyLog.g("ProxyCredentials", "present",
                 		proxyCredentials == null ? "False" : "True");
@@ -804,7 +840,7 @@ public class ServerSelector implements IAbortIndicator
                         "responseTime", worker.responseTime,
                         "sshErrorMessage", worker.sshErrorMessage,
                         "regionCode", worker.entry.regionCode);
-    
+
                     MyLog.d(
                         String.format("server: %s, responded: %s, response time: %d",
                                 worker.entry.ipAddress, worker.responded ? "Yes" : "No", worker.responseTime));
